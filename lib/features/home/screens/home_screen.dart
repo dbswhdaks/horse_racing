@@ -53,7 +53,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 children: [
                   Icon(Icons.emoji_events, color: AppTheme.accentGold),
                   const SizedBox(width: 8),
-                  const Text('경마 예측'),
+                  const Text('경마 Plus'),
                 ],
               ),
               actions: [
