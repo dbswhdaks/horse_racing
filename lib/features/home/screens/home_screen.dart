@@ -144,7 +144,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           ],
           body: TabBarView(
             controller: _tabController,
-            children: _meets.map((meet) => _RaceListTab(meet: meet)).toList(),
+            children: List.generate(_meets.length, (i) =>
+              _RaceListTab(meet: _meets[i], meetLabel: _meetLabels[i]),
+            ),
           ),
         ),
       ),
@@ -218,8 +220,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
 class _RaceListTab extends ConsumerStatefulWidget {
   final String meet;
+  final String meetLabel;
 
-  const _RaceListTab({required this.meet});
+  const _RaceListTab({required this.meet, required this.meetLabel});
 
   @override
   ConsumerState<_RaceListTab> createState() => _RaceListTabState();
@@ -251,7 +254,7 @@ class _RaceListTabState extends ConsumerState<_RaceListTab> {
       ),
       data: (races) {
         if (races.isEmpty) {
-          return _EmptyView(date: selectedDate);
+          return _EmptyView(date: selectedDate, meetLabel: widget.meetLabel);
         }
         races = [...races]..sort((a, b) => a.raceNo.compareTo(b.raceNo));
 
@@ -381,8 +384,9 @@ class _ErrorView extends StatelessWidget {
 
 class _EmptyView extends StatelessWidget {
   final DateTime date;
+  final String meetLabel;
 
-  const _EmptyView({required this.date});
+  const _EmptyView({required this.date, required this.meetLabel});
 
   @override
   Widget build(BuildContext context) {
@@ -395,7 +399,7 @@ class _EmptyView extends StatelessWidget {
             Icon(Icons.event_busy, size: 48, color: Colors.grey.shade700),
             const SizedBox(height: 16),
             Text(
-              '오늘은 경주가 없습니다',
+              '오늘은 $meetLabel경주가 없는 날 입니다.',
               style: TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.w600,

@@ -21,6 +21,9 @@ class ApiConstants {
   // API155: AI학습용 경주결과
   static const String aiRaceResultPath = '/API155/raceResult';
 
+  // API4_3: 한국마사회 경주기록 정보 (참고: API4_3_한국마사회 경주기록 정보.docx)
+  static const String api4_3RaceRecordPath = '/API4_3';
+
   // API16_1: 경주마 성적정보
   static const String horseRecordPath = '/API16_1/horseRecord_1';
 

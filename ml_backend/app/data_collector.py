@@ -108,6 +108,8 @@ def build_training_row(result: dict, entry: dict | None) -> dict:
             "rating": _safe_float(entry.get("rating", 0)),
             "age": _safe_int(entry.get("age", 0)),
             "sex": str(entry.get("sex", "")),
+            "jockey_name": str(entry.get("jkName", entry.get("jkNm", ""))).strip(),
+            "trainer_name": str(entry.get("trName", entry.get("trNm", ""))).strip(),
             "total_races": _safe_int(entry.get("rcCntT") or entry.get("totalCnt")),
             "win_count": _safe_int(entry.get("ord1CntT") or entry.get("ord1Cnt")),
             "place_count": _safe_int(entry.get("ord2CntT") or entry.get("ord2Cnt")),
@@ -120,6 +122,8 @@ def build_training_row(result: dict, entry: dict | None) -> dict:
             "rating": 0.0,
             "age": 0,
             "sex": "",
+            "jockey_name": "",
+            "trainer_name": "",
             "total_races": 0,
             "win_count": 0,
             "place_count": 0,
@@ -193,6 +197,16 @@ def save_data(df: pd.DataFrame, filename: str = "race_data.csv"):
     df.to_csv(path, index=False, encoding="utf-8-sig")
     print(f"저장 완료: {path} ({len(df)}행)")
     return path
+
+
+def load_historical_data(filename: str = "race_data.csv") -> pd.DataFrame:
+    """저장된 과거 경주 데이터를 로드합니다."""
+    path = os.path.join(DATA_DIR, filename)
+    if not os.path.exists(path):
+        return pd.DataFrame()
+    df = pd.read_csv(path)
+    df = df.sort_values(["race_date", "race_no", "horse_no"]).reset_index(drop=True)
+    return df
 
 
 if __name__ == "__main__":

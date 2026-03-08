@@ -35,8 +35,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="경마 AI 예측 서버",
-    description="KRA 데이터 기반 XGBoost 경마 예측 API",
-    version="1.0.0",
+    description="KRA 데이터 기반 멀티모델(XGBoost/LightGBM/CatBoost) + LTR 경마 예측 API",
+    version="2.0.0",
     lifespan=lifespan,
 )
 
