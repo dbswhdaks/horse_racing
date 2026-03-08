@@ -1,5 +1,7 @@
 class RaceEntry {
+  final int raceNo;
   final int horseNo;
+  final int horseRegNo;
   final String horseName;
   final String birthPlace;
   final String sex;
@@ -17,7 +19,9 @@ class RaceEntry {
   final double horseWeight;
 
   RaceEntry({
+    this.raceNo = 0,
     required this.horseNo,
+    this.horseRegNo = 0,
     required this.horseName,
     required this.birthPlace,
     required this.sex,
@@ -36,22 +40,28 @@ class RaceEntry {
   });
 
   factory RaceEntry.fromJson(Map<String, dynamic> json) {
+    final chulNo = _toInt(json['chulNo'] ?? json['startNo']);
+    final hrNo = _toInt(json['hrNo']);
+
     return RaceEntry(
-      horseNo: _toInt(json['hrNo'] ?? json['chulNo']),
-      horseName: _str(json['hrNm']),
-      birthPlace: _str(json['birthPlc'] ?? json['prodCntryNm'] ?? ''),
-      sex: _str(json['sex'] ?? json['sexNm'] ?? ''),
+      raceNo: _toInt(json['rcNo'] ?? json['race_no']),
+      horseNo: chulNo > 0 ? chulNo : hrNo,
+      horseRegNo: hrNo,
+      horseName: _str(json['hrName'] ?? json['hrNm'] ?? json['horseName'] ?? ''),
+      birthPlace: _str(json['prd'] ?? json['birthPlc'] ?? json['prodCntryNm'] ?? ''),
+      sex: _str(json['sex'] ?? json['sexNm'] ?? json['sexCd'] ?? ''),
       age: _toInt(json['age']),
-      jockeyName: _str(json['jkNm'] ?? json['jockyNm'] ?? ''),
-      trainerName: _str(json['trNm'] ?? json['trnrNm'] ?? ''),
-      ownerName: _str(json['owNm'] ?? json['ownrNm'] ?? ''),
-      weight: _toDouble(json['wght'] ?? json['brdnWt']),
+      jockeyName: _cleanName(
+          _str(json['jkName'] ?? json['jkNm'] ?? json['jockyNm'] ?? '')),
+      trainerName: _str(json['trName'] ?? json['trNm'] ?? json['trnrNm'] ?? ''),
+      ownerName: _str(json['owName'] ?? json['owNm'] ?? json['ownrNm'] ?? ''),
+      weight: _toDouble(json['wgBudam'] ?? json['wght'] ?? json['brdnWt']),
       rating: _toDouble(json['rating'] ?? json['rtngPt']),
-      totalPrize: _toInt(json['totalPrz'] ?? json['totalPrzAmt']),
-      recentPrize: _toInt(json['recentPrz'] ?? json['rcnt1YPrzAmt']),
-      winCount: _toInt(json['ord1Cnt']),
-      placeCount: _toInt(json['ord2Cnt']),
-      totalRaces: _toInt(json['totalCnt'] ?? json['strtCnt']),
+      totalPrize: _toInt(json['chaksunT'] ?? json['totalPrz'] ?? json['totalPrzAmt']),
+      recentPrize: _toInt(json['chaksunY'] ?? json['recentPrz'] ?? json['rcnt1YPrzAmt']),
+      winCount: _toInt(json['ord1CntT'] ?? json['ord1Cnt']),
+      placeCount: _toInt(json['ord2CntT'] ?? json['ord2Cnt']),
+      totalRaces: _toInt(json['rcCntT'] ?? json['totalCnt'] ?? json['strtCnt']),
       horseWeight: _toDouble(json['hrWght'] ?? json['rcHrsWt'] ?? 0),
     );
   }
@@ -76,7 +86,11 @@ class RaceEntry {
     }
   }
 
-  static String _str(dynamic v) => v?.toString() ?? '';
+  static String _str(dynamic v) => v?.toString().trim() ?? '';
+
+  static String _cleanName(String name) {
+    return name.replaceAll(RegExp(r'\([^)]*\)'), '').trim();
+  }
   static int _toInt(dynamic v) {
     if (v == null) return 0;
     if (v is int) return v;

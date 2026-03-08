@@ -76,6 +76,7 @@ class LocalPredictor {
       predictions.add(Prediction(
         horseNo: entry.horseNo,
         horseName: entry.horseName,
+        jockeyName: entry.jockeyName,
         winProbability: double.parse(winProb.toStringAsFixed(2)),
         placeProbability: double.parse(placeProb.toStringAsFixed(2)),
         tags: tags,

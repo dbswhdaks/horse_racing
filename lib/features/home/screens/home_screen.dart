@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/shimmer_loading.dart';
@@ -41,6 +42,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
   @override
   Widget build(BuildContext context) {
+    final selectedDate = ref.watch(selectedDateProvider);
+    final dateStr = DateFormat('yyyy.MM.dd (E)', 'ko').format(selectedDate);
+    final isToday = _isSameDay(selectedDate, DateTime.now());
+
     return Scaffold(
       body: SafeArea(
         child: NestedScrollView(
@@ -58,16 +63,19 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               ),
               actions: [
                 IconButton(
-                  icon: const Icon(Icons.calendar_today),
-                  onPressed: _selectDate,
+                  icon: const Icon(Icons.share_rounded),
+                  tooltip: '공유하기',
+                  onPressed: () => _share(dateStr),
                 ),
-                IconButton(
-                  icon: const Icon(Icons.refresh),
-                  onPressed: _refresh,
-                ),
+                if (!isToday)
+                  IconButton(
+                    icon: const Icon(Icons.today),
+                    tooltip: '오늘로 이동',
+                    onPressed: _goToToday,
+                  ),
               ],
               bottom: PreferredSize(
-                preferredSize: const Size.fromHeight(72),
+                preferredSize: const Size.fromHeight(100),
                 child: Column(
                   children: [
                     TabBar(
@@ -75,14 +83,58 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                       tabs: _meetLabels.map((l) => Tab(text: l)).toList(),
                     ),
                     Padding(
-                      padding: const EdgeInsets.only(top: 4, bottom: 4),
-                      child: Text(
-                        DateFormat('yyyy.MM.dd (E)', 'ko').format(DateTime.now()),
-                        style: const TextStyle(
-                          fontSize: 13,
-                          color: Colors.orange,
-                          fontWeight: FontWeight.w400,
-                        ),
+                      padding: const EdgeInsets.symmetric(vertical: 6),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          IconButton(
+                            icon: const Icon(Icons.chevron_left, size: 20),
+                            onPressed: _prevDay,
+                            visualDensity: VisualDensity.compact,
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(
+                              minWidth: 32,
+                              minHeight: 32,
+                            ),
+                          ),
+                          GestureDetector(
+                            onTap: _selectDate,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 4,
+                              ),
+                              decoration: BoxDecoration(
+                                color: isToday
+                                    ? AppTheme.accentGold
+                                        .withValues(alpha: 0.15)
+                                    : Colors.grey.shade800
+                                        .withValues(alpha: 0.5),
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                              child: Text(
+                                isToday ? '$dateStr (오늘)' : dateStr,
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: isToday
+                                      ? AppTheme.accentGold
+                                      : Colors.grey.shade300,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.chevron_right, size: 20),
+                            onPressed: _nextDay,
+                            visualDensity: VisualDensity.compact,
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(
+                              minWidth: 32,
+                              minHeight: 32,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ],
@@ -99,57 +151,138 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     );
   }
 
-  Future<void> _selectDate() async {
-    final picked = await showDatePicker(
-      context: context,
-      initialDate: DateTime.now(),
-      firstDate: DateTime(2020),
-      lastDate: DateTime.now().add(const Duration(days: 30)),
-    );
-    if (picked != null) {
-      // Could implement date selection state here
+  bool _isSameDay(DateTime a, DateTime b) =>
+      a.year == b.year && a.month == b.month && a.day == b.day;
+
+  void _prevDay() {
+    final current = ref.read(selectedDateProvider);
+    ref.read(selectedDateProvider.notifier).state =
+        current.subtract(const Duration(days: 1));
+  }
+
+  void _nextDay() {
+    final current = ref.read(selectedDateProvider);
+    final next = current.add(const Duration(days: 1));
+    if (!next.isAfter(DateTime.now().add(const Duration(days: 30)))) {
+      ref.read(selectedDateProvider.notifier).state = next;
     }
   }
 
-  void _refresh() {
-    final meet = _meets[_tabController.index];
-    ref.invalidate(racePlanProvider((meet: meet, date: null)));
+  void _goToToday() {
+    ref.read(selectedDateProvider.notifier).state = DateTime.now();
   }
+
+  Future<void> _selectDate() async {
+    final current = ref.read(selectedDateProvider);
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: current,
+      firstDate: DateTime(2020),
+      lastDate: DateTime.now().add(const Duration(days: 30)),
+      locale: const Locale('ko'),
+    );
+    if (picked != null) {
+      ref.read(selectedDateProvider.notifier).state = picked;
+    }
+  }
+
+  void _share(String dateStr) {
+    final meet = _meetLabels[_tabController.index];
+    final date = formatDateParam(ref.read(selectedDateProvider));
+    final racesAsync =
+        ref.read(racePlanProvider((meet: _meets[_tabController.index], date: date)));
+    final raceCount = racesAsync.valueOrNull?.length ?? 0;
+
+    final text = StringBuffer()
+      ..writeln('🏇 경마 Plus - $meet 경마')
+      ..writeln('📅 $dateStr')
+      ..writeln('🏁 총 $raceCount개 경주');
+
+    final races = racesAsync.valueOrNull;
+    if (races != null && races.isNotEmpty) {
+      text.writeln();
+      for (final r in races) {
+        final time = r.startTime.length >= 4
+            ? '${r.startTime.substring(0, 2)}:${r.startTime.substring(2, 4)}'
+            : '';
+        text.writeln('${r.raceNo}R $time ${r.raceName} '
+            '${r.distanceLabel} ${r.gradeLabel} ${r.headCount}두');
+      }
+    }
+
+    text.writeln('\n경마 Plus 앱에서 확인하세요!');
+    SharePlus.instance.share(ShareParams(text: text.toString()));
+  }
+
 }
 
-class _RaceListTab extends ConsumerWidget {
+class _RaceListTab extends ConsumerStatefulWidget {
   final String meet;
 
   const _RaceListTab({required this.meet});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final racesAsync = ref.watch(racePlanProvider((meet: meet, date: null)));
+  ConsumerState<_RaceListTab> createState() => _RaceListTabState();
+}
+
+class _RaceListTabState extends ConsumerState<_RaceListTab> {
+  DateTime _lastUpdated = DateTime.now();
+
+  void _refresh() {
+    final dateParam = formatDateParam(ref.read(selectedDateProvider));
+    ref.invalidate(racePlanProvider((meet: widget.meet, date: dateParam)));
+    ref.invalidate(
+        raceHeadCountProvider((meet: widget.meet, date: dateParam)));
+    setState(() => _lastUpdated = DateTime.now());
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final selectedDate = ref.watch(selectedDateProvider);
+    final dateParam = formatDateParam(selectedDate);
+    final racesAsync =
+        ref.watch(racePlanProvider((meet: widget.meet, date: dateParam)));
 
     return racesAsync.when(
       loading: () => const ShimmerCardList(cardHeight: 130),
       error: (err, stack) => _ErrorView(
-        message: '경주 정보를 불러올 수 없습니다',
-        onRetry: () =>
-            ref.invalidate(racePlanProvider((meet: meet, date: null))),
+        message: '경주 정보를 불러올 수 없습니다\n$err',
+        onRetry: _refresh,
       ),
       data: (races) {
         if (races.isEmpty) {
-          return const _EmptyView();
+          return _EmptyView(date: selectedDate);
         }
+        races = [...races]..sort((a, b) => a.raceNo.compareTo(b.raceNo));
+
+        final headCounts = ref
+            .watch(raceHeadCountProvider(
+                (meet: widget.meet, date: dateParam)))
+            .valueOrNull ?? {};
+
         return RefreshIndicator(
-          onRefresh: () async {
-            ref.invalidate(racePlanProvider((meet: meet, date: null)));
-          },
+          onRefresh: () async => _refresh(),
           child: ListView.builder(
-            padding: const EdgeInsets.fromLTRB(0, 8, 0, 24),
-            itemCount: races.length,
+            padding: const EdgeInsets.fromLTRB(0, 4, 0, 24),
+            itemCount: races.length + 1,
             itemBuilder: (context, index) {
-              final race = races[index];
+              if (index == 0) {
+                return _UpdateButton(
+                  lastUpdated: _lastUpdated,
+                  onTap: _refresh,
+                );
+              }
+              final race = races[index - 1];
+              final actualHeadCount =
+                  headCounts[race.raceNo] ?? race.headCount;
               return RaceCard(
                 race: race,
+                headCount: actualHeadCount,
                 onTap: () => context.push(
-                  '/race/${race.meet}/${race.raceDate}/${race.raceNo}',
+                  '/entry/${race.meet}/${race.raceDate}/${race.raceNo}',
+                ),
+                onResultTap: () => context.push(
+                  '/result/${race.meet}/${race.raceDate}/${race.raceNo}',
                 ),
               );
             },
@@ -159,6 +292,58 @@ class _RaceListTab extends ConsumerWidget {
     );
   }
 }
+
+// ── 업데이트 버튼 ──
+
+class _UpdateButton extends StatelessWidget {
+  final DateTime lastUpdated;
+  final VoidCallback onTap;
+
+  const _UpdateButton({
+    required this.lastUpdated,
+    required this.onTap,
+  });
+
+  String _timeAgo(DateTime from) {
+    final diff = DateTime.now().difference(from);
+    if (diff.inSeconds < 5) return '방금';
+    if (diff.inSeconds < 60) return '${diff.inSeconds}초 전';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}분 전';
+    return '${diff.inHours}시간 전';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder(
+      stream: Stream.periodic(const Duration(seconds: 1)),
+      builder: (context, _) {
+        final label = _timeAgo(lastUpdated);
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(12, 4, 12, 6),
+          child: Row(
+            children: [
+              Text(
+                '$label 업데이트',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Colors.grey.shade500,
+                ),
+              ),
+              const SizedBox(width: 6),
+              GestureDetector(
+                onTap: onTap,
+                child: Icon(Icons.refresh_rounded,
+                    size: 18, color: AppTheme.primaryGreen),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+// ── 에러 / 빈 화면 ──
 
 class _ErrorView extends StatelessWidget {
   final String message;
@@ -195,7 +380,9 @@ class _ErrorView extends StatelessWidget {
 }
 
 class _EmptyView extends StatelessWidget {
-  const _EmptyView();
+  final DateTime date;
+
+  const _EmptyView({required this.date});
 
   @override
   Widget build(BuildContext context) {
@@ -205,11 +392,15 @@ class _EmptyView extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.event_busy, size: 64, color: Colors.grey.shade600),
+            Icon(Icons.event_busy, size: 48, color: Colors.grey.shade700),
             const SizedBox(height: 16),
             Text(
-              '오늘 예정된 경주가 없습니다',
-              style: Theme.of(context).textTheme.bodyLarge,
+              '오늘은 경주가 없습니다',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+                color: Colors.grey.shade400,
+              ),
               textAlign: TextAlign.center,
             ),
           ],

@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: horse-racing-ml
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: KRA_SERVICE_KEY
+        sync: false
+    plan: free

@@ -81,7 +81,7 @@ class RaceDetailScreen extends ConsumerWidget {
               ),
             ),
 
-            // 출마표 헤더 + 결과 버튼
+            // 출마표 헤더 + 버튼들
             SliverToBoxAdapter(
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(20, 16, 12, 8),
@@ -96,6 +96,25 @@ class RaceDetailScreen extends ConsumerWidget {
                         ),
                       ),
                     ),
+                    SizedBox(
+                      height: 34,
+                      child: OutlinedButton.icon(
+                        onPressed: () =>
+                            context.push('/entry/$meet/$date/$raceNo'),
+                        icon: const Icon(Icons.table_chart_rounded, size: 16),
+                        label: const Text(
+                          '상세보기',
+                          style: TextStyle(fontSize: 12),
+                        ),
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
                     SizedBox(
                       height: 34,
                       child: FilledButton.icon(

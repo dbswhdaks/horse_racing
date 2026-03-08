@@ -51,7 +51,7 @@ class Race {
       prize1: _toInt(json['chaksun1'] ?? json['prz1']),
       prize2: _toInt(json['chaksun2'] ?? json['prz2']),
       prize3: _toInt(json['chaksun3'] ?? json['prz3']),
-      headCount: _toInt(json['ilsu'] ?? json['headCnt'] ?? 0),
+      headCount: _toInt(json['dusu'] ?? json['headCnt'] ?? 0),
     );
   }
 

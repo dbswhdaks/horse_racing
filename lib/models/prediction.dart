@@ -1,6 +1,7 @@
 class Prediction {
   final int horseNo;
   final String horseName;
+  final String jockeyName;
   final double winProbability;
   final double placeProbability;
   final List<String> tags;
@@ -9,6 +10,7 @@ class Prediction {
   Prediction({
     required this.horseNo,
     required this.horseName,
+    this.jockeyName = '',
     required this.winProbability,
     required this.placeProbability,
     required this.tags,
@@ -19,6 +21,7 @@ class Prediction {
     return Prediction(
       horseNo: json['horse_no'] as int? ?? 0,
       horseName: json['horse_name'] as String? ?? '',
+      jockeyName: json['jockey_name'] as String? ?? '',
       winProbability: (json['win_probability'] as num?)?.toDouble() ?? 0.0,
       placeProbability: (json['place_probability'] as num?)?.toDouble() ?? 0.0,
       tags: (json['tags'] as List<dynamic>?)

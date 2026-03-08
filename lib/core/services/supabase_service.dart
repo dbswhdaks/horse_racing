@@ -50,6 +50,7 @@ class SupabaseService {
     if (raceNo != null) query = query.eq('race_no', raceNo);
     final data = await query.order('horse_no');
     return data.map<RaceEntry>((row) => RaceEntry(
+      raceNo: row['race_no'] ?? 0,
       horseNo: row['horse_no'] ?? 0,
       horseName: row['horse_name'] ?? '',
       birthPlace: row['birth_place'] ?? '',
@@ -81,6 +82,7 @@ class SupabaseService {
     if (raceNo != null) query = query.eq('race_no', raceNo);
     final data = await query.order('rank');
     return data.map<RaceResult>((row) => RaceResult(
+      raceNo: row['race_no'] ?? 0,
       rank: row['rank'] ?? 0,
       horseNo: row['horse_no'] ?? 0,
       horseName: row['horse_name'] ?? '',
@@ -109,8 +111,9 @@ class SupabaseService {
   }) async {
     var query = _client.from('race_results').select().eq('horse_name', horseName);
     if (meet != null) query = query.eq('meet', meet);
-    final data = await query.order('race_date', ascending: false).limit(30);
+    final data = await query.order('race_date', ascending: false).limit(200);
     return data.map<RaceResult>((row) => RaceResult(
+      raceNo: row['race_no'] ?? 0,
       rank: row['rank'] ?? 0,
       horseNo: row['horse_no'] ?? 0,
       horseName: row['horse_name'] ?? '',
@@ -160,6 +163,7 @@ class SupabaseService {
       return Prediction(
         horseNo: row['horse_no'] ?? 0,
         horseName: row['horse_name'] ?? '',
+        jockeyName: row['jockey_name'] ?? '',
         winProbability: (row['win_probability'] as num?)?.toDouble() ?? 0,
         placeProbability: (row['place_probability'] as num?)?.toDouble() ?? 0,
         tags: tags,

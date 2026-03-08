@@ -3,9 +3,11 @@ import 'package:go_router/go_router.dart';
 
 import '../features/home/screens/home_screen.dart';
 import '../features/race/screens/race_detail_screen.dart';
+import '../features/race/screens/race_entry_screen.dart';
 import '../features/race/screens/race_result_screen.dart';
 import '../features/horse/screens/horse_detail_screen.dart';
 import '../features/prediction/screens/prediction_screen.dart';
+import '../models/race_entry.dart';
 
 final appRouter = GoRouter(
   initialLocation: '/',
@@ -17,6 +19,14 @@ final appRouter = GoRouter(
     GoRoute(
       path: '/race/:meet/:date/:raceNo',
       builder: (context, state) => RaceDetailScreen(
+        meet: state.pathParameters['meet']!,
+        date: state.pathParameters['date']!,
+        raceNo: int.parse(state.pathParameters['raceNo']!),
+      ),
+    ),
+    GoRoute(
+      path: '/entry/:meet/:date/:raceNo',
+      builder: (context, state) => RaceEntryScreen(
         meet: state.pathParameters['meet']!,
         date: state.pathParameters['date']!,
         raceNo: int.parse(state.pathParameters['raceNo']!),
@@ -35,6 +45,7 @@ final appRouter = GoRouter(
       builder: (context, state) => HorseDetailScreen(
         horseName: state.pathParameters['horseName']!,
         meet: state.uri.queryParameters['meet'] ?? '1',
+        entry: state.extra is RaceEntry ? state.extra as RaceEntry : null,
       ),
     ),
     GoRoute(
