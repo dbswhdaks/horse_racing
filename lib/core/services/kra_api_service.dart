@@ -96,13 +96,28 @@ class KraApiService {
     }
     if (rcNo != null) params['race_no'] = rcNo;
 
+    debugPrint('[KRA] getRaceResult 요청 params=$params');
     final response = await _get(ApiConstants.raceResultPath, params);
-    if (response == null) return [];
-    var results = _parseList(response, (json) => RaceResult.fromJson(json));
+    if (response == null) {
+      debugPrint('[KRA] getRaceResult 응답 없음 (null)');
+      return [];
+    }
 
-    // API155는 race_no 서버 필터가 안 되므로 클라이언트에서 필터링
+    final body = response.data;
+    if (body is Map<String, dynamic>) {
+      final header = body['response']?['header'];
+      final resultCode = header?['resultCode']?.toString();
+      final totalCount = body['response']?['body']?['totalCount'];
+      debugPrint('[KRA] getRaceResult resultCode=$resultCode, '
+          'totalCount=$totalCount');
+    }
+
+    var results = _parseList(response, (json) => RaceResult.fromJson(json));
+    debugPrint('[KRA] getRaceResult 파싱 결과: ${results.length}건');
+
     if (rcNo != null && results.isNotEmpty) {
       final filtered = results.where((r) => r.raceNo == rcNo).toList();
+      debugPrint('[KRA] raceNo=$rcNo 필터 후: ${filtered.length}건');
       if (filtered.isNotEmpty) return filtered;
     }
     return results;

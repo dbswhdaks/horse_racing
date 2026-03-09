@@ -66,7 +66,8 @@ class RaceResultScreen extends ConsumerWidget {
                       ),
                       const SizedBox(height: 6),
                       Text(
-                        '아직 진행되지 않은 경주일 수 있습니다',
+                        '경주 종료 후 결과 반영까지\n시간이 걸릴 수 있습니다',
+                        textAlign: TextAlign.center,
                         style: TextStyle(
                           fontSize: 13,
                           color: Colors.grey.shade500,
@@ -80,6 +81,14 @@ class RaceResultScreen extends ConsumerWidget {
                         ),
                         icon: const Icon(Icons.refresh, size: 18),
                         label: const Text('다시 시도'),
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        '$meetName $date ${raceNo}R',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: Colors.grey.shade600,
+                        ),
                       ),
                     ],
                   ),
@@ -254,21 +263,15 @@ class _PodiumSection extends StatelessWidget {
   }
 
   List<Widget> _buildPodiumOrder() {
-    if (results.length < 3) {
-      return results.asMap().entries.map((e) {
-        return Expanded(
-          child: _PodiumCard(result: e.value, rank: e.key + 1),
-        );
-      }).toList();
+    final count = results.length.clamp(0, 3);
+    final widgets = <Widget>[];
+    for (int i = 0; i < count; i++) {
+      if (i > 0) widgets.add(const SizedBox(width: 6));
+      widgets.add(
+        Expanded(child: _PodiumCard(result: results[i], rank: i + 1)),
+      );
     }
-
-    return [
-      Expanded(child: _PodiumCard(result: results[1], rank: 2)),
-      const SizedBox(width: 6),
-      Expanded(child: _PodiumCard(result: results[0], rank: 1)),
-      const SizedBox(width: 6),
-      Expanded(child: _PodiumCard(result: results[2], rank: 3)),
-    ];
+    return widgets;
   }
 }
 
@@ -313,23 +316,30 @@ class _PodiumCard extends StatelessWidget {
             decoration: BoxDecoration(
               color: color,
               borderRadius: BorderRadius.circular(8),
+              boxShadow: [
+                BoxShadow(
+                  color: color.withValues(alpha: 0.4),
+                  blurRadius: 4,
+                  offset: const Offset(0, 1),
+                ),
+              ],
             ),
             child: Text(
               rankLabels[(rank - 1).clamp(0, 2)],
-              style: TextStyle(
-                fontSize: rank == 1 ? 14 : 12,
+              style: const TextStyle(
+                fontSize: 14,
                 fontWeight: FontWeight.w900,
-                color: Colors.white,
+                color: Color(0xFF1A1A1A),
               ),
             ),
           ),
           const SizedBox(height: 6),
-          _HorseNumberBadge(no: result.horseNo, size: rank == 1 ? 32 : 26),
+          _HorseNumberBadge(no: result.horseNo, size: 30),
           const SizedBox(height: 4),
           Text(
             result.horseName,
-            style: TextStyle(
-              fontSize: rank == 1 ? 14 : 12,
+            style: const TextStyle(
+              fontSize: 13,
               fontWeight: FontWeight.w800,
             ),
             maxLines: 1,
@@ -353,7 +363,7 @@ class _PodiumCard extends StatelessWidget {
             Text(
               result.raceTime,
               style: TextStyle(
-                fontSize: rank == 1 ? 13 : 11,
+                fontSize: 12,
                 fontWeight: FontWeight.w700,
                 color: color,
               ),
@@ -370,7 +380,7 @@ class _PodiumCard extends StatelessWidget {
               child: Text(
                 '${result.winOdds.toStringAsFixed(1)}배',
                 style: TextStyle(
-                  fontSize: rank == 1 ? 14 : 12,
+                  fontSize: 13,
                   fontWeight: FontWeight.w800,
                   color: AppTheme.accentGold,
                 ),

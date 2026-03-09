@@ -205,12 +205,35 @@ class RaceCard extends StatelessWidget {
     );
   }
 
-  _RaceStatus _raceStatus() {
-    if (race.startTime.isEmpty) return _RaceStatus.upcoming;
-    final now = DateTime.now();
+  DateTime? _raceDay() {
+    if (race.raceDate.length < 8) return null;
+    final y = int.tryParse(race.raceDate.substring(0, 4));
+    final mo = int.tryParse(race.raceDate.substring(4, 6));
+    final d = int.tryParse(race.raceDate.substring(6, 8));
+    if (y == null || mo == null || d == null) return null;
+    return DateTime(y, mo, d);
+  }
+
+  DateTime? _startDateTime() {
+    if (race.startTime.isEmpty || race.startTime.length < 4) return null;
     final h = int.tryParse(race.startTime.substring(0, 2)) ?? 0;
     final m = int.tryParse(race.startTime.substring(2, 4)) ?? 0;
-    final start = DateTime(now.year, now.month, now.day, h, m);
+    final day = _raceDay();
+    if (day != null) return DateTime(day.year, day.month, day.day, h, m);
+    final now = DateTime.now();
+    return DateTime(now.year, now.month, now.day, h, m);
+  }
+
+  _RaceStatus _raceStatus() {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final day = _raceDay();
+
+    if (day != null && day.isBefore(today)) return _RaceStatus.finished;
+    if (day != null && day.isAfter(today)) return _RaceStatus.upcoming;
+
+    final start = _startDateTime();
+    if (start == null) return _RaceStatus.upcoming;
     final diff = start.difference(now).inMinutes;
     if (diff > 0) return _RaceStatus.upcoming;
     if (diff > -30) return _RaceStatus.live;
@@ -218,11 +241,18 @@ class RaceCard extends StatelessWidget {
   }
 
   String _countdown() {
-    if (race.startTime.isEmpty || race.startTime.length < 4) return '';
     final now = DateTime.now();
-    final h = int.tryParse(race.startTime.substring(0, 2)) ?? 0;
-    final m = int.tryParse(race.startTime.substring(2, 4)) ?? 0;
-    final start = DateTime(now.year, now.month, now.day, h, m);
+    final today = DateTime(now.year, now.month, now.day);
+    final day = _raceDay();
+
+    if (day != null && day.isBefore(today)) return '';
+    if (day != null && day.isAfter(today)) {
+      final daysLeft = day.difference(today).inDays;
+      return '$daysLeft일 후';
+    }
+
+    final start = _startDateTime();
+    if (start == null) return '';
     final diff = start.difference(now);
     if (diff.isNegative && diff.inMinutes < -30) return '';
     if (diff.isNegative) return '진행중';

@@ -83,8 +83,8 @@ def _parse_horse_weight(v) -> float:
 
 def build_training_row(result: dict, entry: dict | None) -> dict:
     """경주결과 + 출전표 데이터를 합쳐 학습용 1행을 만듭니다."""
-    race_no = _safe_int(result.get("rcNo") or result.get("race_no"))
-    horse_no = _safe_int(result.get("gtno") or result.get("chulNo"))
+    race_no = _safe_int(result.get("raceNo") or result.get("rcNo") or result.get("race_no"))
+    horse_no = _safe_int(result.get("gtno") or result.get("chulNo") or result.get("hrNo"))
 
     row = {
         "meet": str(result.get("meet", result.get("rccrsNm", ""))),
@@ -172,8 +172,8 @@ def collect_date_range(
                 entry_map[(rc_no, chul_no)] = e
 
         for r in results:
-            rc_no = _safe_int(r.get("rcNo") or r.get("race_no"))
-            h_no = _safe_int(r.get("gtno") or r.get("chulNo"))
+            rc_no = _safe_int(r.get("raceNo") or r.get("rcNo") or r.get("race_no"))
+            h_no = _safe_int(r.get("gtno") or r.get("chulNo") or r.get("hrNo"))
             entry = entry_map.get((rc_no, h_no))
             rows.append(build_training_row(r, entry))
 

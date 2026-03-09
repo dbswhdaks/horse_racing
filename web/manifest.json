@@ -1,11 +1,11 @@
 {
-    "name": "horse_racing",
-    "short_name": "horse_racing",
+    "name": "경마 Plus",
+    "short_name": "경마 Plus",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#121212",
+    "theme_color": "#1B5E20",
+    "description": "경마 예측 앱 - 한국마사회 공공데이터 기반",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

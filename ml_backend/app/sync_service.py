@@ -118,8 +118,8 @@ def sync_results(meet: str, date_str: str):
 
     rows = []
     for r in items:
-        race_no = _safe_int(r.get("rcNo") or r.get("race_no"))
-        horse_no = _safe_int(r.get("gtno") or r.get("chulNo"))
+        race_no = _safe_int(r.get("raceNo") or r.get("rcNo") or r.get("race_no"))
+        horse_no = _safe_int(r.get("gtno") or r.get("chulNo") or r.get("hrNo"))
 
         race_time_raw = r.get("raceRcd", r.get("rcTime", ""))
         if isinstance(race_time_raw, (int, float)):

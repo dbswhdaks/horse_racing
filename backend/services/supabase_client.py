@@ -200,21 +200,41 @@ def _map_entry(r: dict, meet: str, race_date: str) -> dict:
 def _map_result(r: dict, meet: str) -> dict:
     return {
         "meet": meet,
-        "race_date": str(r.get("rcDate", r.get("race_date", r.get("collect_date", "")))),
-        "race_no": _safe_int(r.get("rcNo", r.get("race_no", 0))),
-        "rank": _safe_int(r.get("ord", r.get("rank", 0))),
-        "horse_no": _safe_int(r.get("hrNo", r.get("chulNo", r.get("horse_no", 0)))),
-        "horse_name": str(r.get("hrNm", r.get("horse_name", ""))),
-        "jockey_name": str(r.get("jkNm", r.get("jockyNm", r.get("jockey_name", "")))),
-        "trainer_name": str(r.get("trNm", r.get("trainer_name", ""))),
-        "race_time": str(r.get("rcTime", r.get("race_time", ""))),
-        "weight": _safe_float(r.get("wght", r.get("brdnWt", r.get("weight", 0)))),
-        "horse_weight": _safe_float(r.get("hrWght", r.get("rcHrsWt", r.get("horse_weight", 0)))),
-        "rank_diff": str(r.get("rankDiff", r.get("rank_diff", ""))),
-        "win_odds": _safe_float(r.get("winOdds", r.get("win_odds", 0))),
-        "place_odds": _safe_float(r.get("plcOdds", r.get("place_odds", 0))),
+        "race_date": str(
+            r.get("raceDt", r.get("rcDate", r.get("race_date", r.get("collect_date", ""))))
+        ),
+        "race_no": _safe_int(
+            r.get("raceNo") or r.get("rcNo") or r.get("race_no") or 0
+        ),
+        "rank": _safe_int(r.get("rk") or r.get("ord") or r.get("rank") or 0),
+        "horse_no": _safe_int(
+            r.get("gtno") or r.get("hrNo") or r.get("chulNo") or r.get("horse_no") or 0
+        ),
+        "horse_name": str(
+            r.get("hrnm", r.get("hrNm", r.get("horse_name", "")))
+        ),
+        "jockey_name": str(
+            r.get("jckyNm", r.get("jkNm", r.get("jockyNm", r.get("jockey_name", ""))))
+        ),
+        "trainer_name": str(
+            r.get("trarNm", r.get("trNm", r.get("trainer_name", "")))
+        ),
+        "race_time": str(r.get("raceRcd", r.get("rcTime", r.get("race_time", "")))),
+        "weight": _safe_float(
+            r.get("burdWgt") or r.get("wght") or r.get("brdnWt") or r.get("weight") or 0
+        ),
+        "horse_weight": _safe_float(
+            r.get("rchrWeg") or r.get("hrWght") or r.get("rcHrsWt") or r.get("horse_weight") or 0
+        ),
+        "rank_diff": str(r.get("margin", r.get("rankDiff", r.get("rank_diff", "")))),
+        "win_odds": _safe_float(
+            r.get("winPrice") or r.get("winOdds") or r.get("win_odds") or 0
+        ),
+        "place_odds": _safe_float(
+            r.get("placePrice") or r.get("plcOdds") or r.get("place_odds") or 0
+        ),
         "s1f": str(r.get("s1f", "")),
         "g3f": str(r.get("g3f", "")),
-        "pass_order": str(r.get("passOrder", r.get("pass_order", ""))),
-        "distance": _safe_int(r.get("rcDist", r.get("distance", 0))),
+        "pass_order": str(r.get("ordBigo", r.get("passOrder", r.get("pass_order", "")))),
+        "distance": _safe_int(r.get("raceDs") or r.get("rcDist") or r.get("distance") or 0),
     }

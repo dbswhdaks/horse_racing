@@ -205,6 +205,34 @@ class RaceEntryScreen extends ConsumerWidget {
               },
             ),
 
+            if (_isRaceFinished(race))
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 16, 12, 32),
+                  child: FilledButton.icon(
+                    onPressed: () => context.push(
+                      '/result/$meet/$date/$raceNo',
+                    ),
+                    icon: const Icon(Icons.emoji_events_rounded),
+                    label: const Text(
+                      '경주결과 보기',
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: AppTheme.winColor,
+                      foregroundColor: Colors.black,
+                      minimumSize: const Size(double.infinity, 48),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+
             const SliverPadding(padding: EdgeInsets.only(bottom: 32)),
           ],
         ),
@@ -212,10 +240,22 @@ class RaceEntryScreen extends ConsumerWidget {
     );
   }
 
-  static bool _isRaceFinished(Race? race) {
+  bool _isRaceFinished(Race? race) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+
+    if (date.length >= 8) {
+      final y = int.tryParse(date.substring(0, 4));
+      final mo = int.tryParse(date.substring(4, 6));
+      final d = int.tryParse(date.substring(6, 8));
+      if (y != null && mo != null && d != null) {
+        final raceDay = DateTime(y, mo, d);
+        if (raceDay.isBefore(today)) return true;
+      }
+    }
+
     if (race == null || race.startTime.isEmpty) return false;
     try {
-      final now = DateTime.now();
       final t = race.startTime.replaceAll(':', '').trim();
       final h = int.parse(t.substring(0, t.length - 2));
       final m = int.parse(t.substring(t.length - 2));

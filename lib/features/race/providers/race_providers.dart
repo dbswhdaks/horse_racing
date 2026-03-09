@@ -96,22 +96,66 @@ final raceHeadCountProvider = FutureProvider.family<Map<int, int>,
 final raceResultProvider = FutureProvider.family<List<RaceResult>,
     ({String meet, String? date, int? raceNo})>(
   (ref, params) async {
+    debugPrint('[RESULT] 조회 시작: meet=${params.meet}, '
+        'date=${params.date}, raceNo=${params.raceNo}');
+
     final supa = ref.read(supabaseServiceProvider);
+
+    // 1) Supabase: race_no 필터 포함 조회
     try {
       final results = await supa.getResults(
         meet: params.meet,
         raceDate: params.date,
         raceNo: params.raceNo,
       );
+      debugPrint('[RESULT] Supabase(raceNo필터): ${results.length}건');
       if (results.isNotEmpty) return results;
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('[RESULT] Supabase 실패: $e');
+    }
 
+    // 2) Supabase: race_no=0 데이터 대비 → 출마표 마명으로 매칭
+    if (params.raceNo != null) {
+      try {
+        final allResults = await supa.getResults(
+          meet: params.meet,
+          raceDate: params.date,
+        );
+        if (allResults.isNotEmpty) {
+          final entries = await ref.read(raceStartListProvider(
+            (meet: params.meet, date: params.date, raceNo: params.raceNo),
+          ).future);
+          if (entries.isNotEmpty) {
+            final horseNames = entries.map((e) => e.horseName).toSet();
+            final matched = allResults
+                .where((r) => horseNames.contains(r.horseName))
+                .toList();
+            debugPrint('[RESULT] 마명 매칭: 전체 ${allResults.length}건 중 '
+                '${matched.length}건 매칭 (출마표 ${entries.length}두)');
+            if (matched.isNotEmpty) return matched;
+          }
+        }
+      } catch (e) {
+        debugPrint('[RESULT] Supabase 마명매칭 실패: $e');
+      }
+    }
+
+    // 3) KRA API fallback
     final kra = ref.read(kraApiServiceProvider);
-    return kra.getRaceResult(
-      meet: params.meet,
-      rcDate: params.date,
-      rcNo: params.raceNo,
-    );
+    try {
+      final results = await kra.getRaceResult(
+        meet: params.meet,
+        rcDate: params.date,
+        rcNo: params.raceNo,
+      );
+      debugPrint('[RESULT] KRA API: ${results.length}건');
+      if (results.isNotEmpty) return results;
+    } catch (e) {
+      debugPrint('[RESULT] KRA API 실패: $e');
+    }
+
+    debugPrint('[RESULT] 모든 소스에서 결과 없음');
+    throw Exception('경주결과를 가져올 수 없습니다');
   },
 );
 
