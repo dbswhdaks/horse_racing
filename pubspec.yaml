@@ -1,49 +1,56 @@
+# 앱 기본 정보
 name: horse_racing
 description: "경마 예측 앱 - 한국마사회 공공데이터 기반"
-publish_to: 'none'
-version: 1.0.0+1
+publish_to: 'none' # pub.dev에 배포하지 않음 (비공개 앱)
+version: 1.0.0+1  # 버전명+빌드번호
 
+# Flutter SDK 버전 제약
 environment:
   sdk: ^3.9.0
 
+# 런타임 의존성 패키지
 dependencies:
   flutter:
     sdk: flutter
-  flutter_localizations:
+  flutter_localizations: # 다국어(한국어) 지원
     sdk: flutter
-  cupertino_icons: ^1.0.8
-  flutter_riverpod: ^2.6.1
-  dio: ^5.7.0
-  go_router: ^14.8.1
-  fl_chart: ^0.70.2
-  intl: ^0.20.2
-  shimmer: ^3.0.0
-  cached_network_image: ^3.4.1
-  json_annotation: ^4.9.0
-  google_fonts: ^6.2.1
-  supabase_flutter: ^2.8.0
-  share_plus: ^12.0.1
+  cupertino_icons: ^1.0.8       # iOS 스타일 아이콘
+  flutter_riverpod: ^2.6.1      # 상태 관리 (Provider 패턴)
+  dio: ^5.7.0                   # HTTP 클라이언트 (API 통신)
+  go_router: ^14.8.1            # 선언형 라우팅 및 딥링크
+  fl_chart: ^0.70.2             # 차트/그래프 시각화
+  intl: ^0.20.2                 # 날짜·숫자 국제화 포맷
+  shimmer: ^3.0.0               # 로딩 스켈레톤 UI 효과
+  cached_network_image: ^3.4.1  # 네트워크 이미지 캐싱
+  json_annotation: ^4.9.0       # JSON 직렬화 어노테이션
+  google_fonts: ^6.2.1          # 구글 폰트 적용
+  supabase_flutter: ^2.8.0      # Supabase 백엔드 연동 (DB, Auth)
+  share_plus: ^12.0.1           # 외부 공유 기능
 
+# 개발 전용 의존성 (빌드·테스트·코드생성)
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  flutter_lints: ^5.0.0
-  json_serializable: ^6.9.4
-  build_runner: ^2.4.14
-  flutter_launcher_icons: ^0.14.3
+  flutter_lints: ^5.0.0         # 린트 규칙 (코드 품질 검사)
+  json_serializable: ^6.9.4     # JSON 직렬화 코드 자동 생성
+  build_runner: ^2.4.14         # 코드 생성 빌드 도구
+  flutter_launcher_icons: ^0.14.3 # 앱 아이콘 자동 생성 도구
 
+# 앱 아이콘 설정 (flutter_launcher_icons)
 flutter_launcher_icons:
-  android: true
-  ios: true
-  image_path: "assets/images/app_logo.png"
-  adaptive_icon_background: "#0D2B3E"
-  adaptive_icon_foreground: "assets/images/app_logo.png"
+  android: true                 # Android 아이콘 생성
+  ios: true                     # iOS 아이콘 생성
+  image_path: "assets/images/app_logo.png"          # 기본 아이콘 이미지
+  adaptive_icon_background: "#0D2B3E"               # Android 적응형 아이콘 배경색 (다크 네이비)
+  adaptive_icon_foreground: "assets/images/app_logo.png" # Android 적응형 아이콘 전경 이미지
   web:
-    generate: true
+    generate: true              # 웹용 아이콘 생성
     image_path: "assets/images/app_logo.png"
 
+# Flutter 앱 전역 설정
 flutter:
-  uses-material-design: true
+  uses-material-design: true    # Material 디자인 아이콘/위젯 사용
 
+  # 정적 에셋 경로 선언
   assets:
-    - assets/images/
+    - assets/images/            # 앱 내 이미지 리소스

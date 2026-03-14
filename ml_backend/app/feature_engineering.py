@@ -33,6 +33,13 @@ BASE_FEATURE_COLUMNS = [
     "weight_per_distance",
     "experience_score",
     "form_score",
+    "rating_normalized",
+    "rating_rank_in_race",
+    "is_top_rating",
+    "burden_weight_rank",
+    "is_light_weight",
+    "running_style_score",
+    "pace_advantage",
 ]
 
 ROLLING_FEATURE_COLUMNS = [
@@ -42,6 +49,12 @@ ROLLING_FEATURE_COLUMNS = [
     "days_since_last_race",
     "rank_trend",
     "jockey_win_rate",
+    "jockey_horse_combo_wins",
+    "distance_win_rate",
+    "distance_place_rate",
+    "horse_weight_change",
+    "training_condition_score",
+    "recent_avg_time_improvement",
 ]
 
 FEATURE_COLUMNS = BASE_FEATURE_COLUMNS + ROLLING_FEATURE_COLUMNS
@@ -93,6 +106,37 @@ def engineer_features(df: pd.DataFrame) -> pd.DataFrame:
         0.0,
     )
 
+    out["rating_normalized"] = out["rating"] / 120.0
+
+    race_group = out.groupby(["meet", "race_date", "race_no"])
+    out["rating_rank_in_race"] = race_group["rating"].rank(ascending=False, method="min")
+    out["is_top_rating"] = (out["rating_rank_in_race"] <= 3).astype(int)
+
+    out["burden_weight_rank"] = race_group["burden_weight"].rank(ascending=True, method="min")
+    out["is_light_weight"] = (out["burden_weight"] <= 53).astype(int)
+
+    out["running_style_score"] = np.where(
+        (out["rating"] >= 80) & (out["win_rate"] >= 0.2), 4,
+        np.where(
+            out["rating"] >= 70, 3,
+            np.where(
+                out["rating"] >= 50, 2,
+                1
+            )
+        )
+    )
+
+    front_runners_count = race_group["running_style_score"].transform(
+        lambda x: (x >= 3).sum()
+    )
+    out["pace_advantage"] = np.where(
+        (front_runners_count >= 4) & (out["running_style_score"] <= 2), 1.0,
+        np.where(
+            (front_runners_count <= 1) & (out["running_style_score"] >= 3), 1.0,
+            0.0
+        )
+    )
+
     return out
 
 
@@ -140,6 +184,58 @@ def add_rolling_features(df: pd.DataFrame, window: int = 5) -> pd.DataFrame:
     else:
         out["jockey_win_rate"] = 0.0
 
+    if "jockey_name" in out.columns and "horse_name" in out.columns:
+        combo_grp = out.groupby(["jockey_name", "horse_name"])
+        out["jockey_horse_combo_wins"] = combo_grp["_is_win_v"].transform(
+            lambda x: x.shift(1).cumsum()
+        )
+    else:
+        out["jockey_horse_combo_wins"] = 0.0
+
+    if "race_distance" in out.columns:
+        def _distance_stats(group):
+            wins = group["_is_win_v"].shift(1).rolling(10, min_periods=1).mean()
+            places = group["_is_place_v"].shift(1).rolling(10, min_periods=1).mean()
+            return pd.DataFrame({"win": wins, "place": places})
+        
+        dist_grp = out.groupby(["horse_name", "race_distance"])
+        out["distance_win_rate"] = dist_grp["_is_win_v"].transform(
+            lambda x: x.shift(1).rolling(10, min_periods=1).mean()
+        )
+        out["distance_place_rate"] = dist_grp["_is_place_v"].transform(
+            lambda x: x.shift(1).rolling(10, min_periods=1).mean()
+        )
+    else:
+        out["distance_win_rate"] = 0.0
+        out["distance_place_rate"] = 0.0
+
+    if "horse_weight" in out.columns:
+        out["horse_weight_change"] = horse_grp["horse_weight"].transform(
+            lambda x: x.diff()
+        )
+    else:
+        out["horse_weight_change"] = 0.0
+
+    out["training_condition_score"] = np.where(
+        (out["days_since_last_race"] <= 30) & (out["rank_trend"] < 0), 2.0,
+        np.where(
+            out["days_since_last_race"] <= 45, 1.0,
+            np.where(
+                out["days_since_last_race"] >= 90, -1.0,
+                0.0
+            )
+        )
+    )
+
+    if "race_time" in out.columns:
+        out["_race_time_float"] = pd.to_numeric(out["race_time"], errors="coerce")
+        out["recent_avg_time_improvement"] = horse_grp["_race_time_float"].transform(
+            lambda x: x.shift(1).diff().rolling(3, min_periods=1).mean() * -1
+        )
+        out.drop(columns=["_race_time_float"], inplace=True, errors="ignore")
+    else:
+        out["recent_avg_time_improvement"] = 0.0
+
     median_field = out["field_size"].median() if "field_size" in out.columns else 8.0
     out["recent_5_avg_rank"] = out["recent_5_avg_rank"].fillna(median_field / 2)
     out["recent_5_win_rate"] = out["recent_5_win_rate"].fillna(0.0)
@@ -147,6 +243,12 @@ def add_rolling_features(df: pd.DataFrame, window: int = 5) -> pd.DataFrame:
     out["days_since_last_race"] = out["days_since_last_race"].fillna(90.0)
     out["rank_trend"] = out["rank_trend"].fillna(0.0)
     out["jockey_win_rate"] = out["jockey_win_rate"].fillna(0.0)
+    out["jockey_horse_combo_wins"] = out["jockey_horse_combo_wins"].fillna(0.0)
+    out["distance_win_rate"] = out["distance_win_rate"].fillna(0.0)
+    out["distance_place_rate"] = out["distance_place_rate"].fillna(0.0)
+    out["horse_weight_change"] = out["horse_weight_change"].fillna(0.0)
+    out["training_condition_score"] = out["training_condition_score"].fillna(0.0)
+    out["recent_avg_time_improvement"] = out["recent_avg_time_improvement"].fillna(0.0)
 
     out.drop(
         columns=["_race_dt", "_rank_v", "_is_win_v", "_is_place_v"],

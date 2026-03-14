@@ -263,37 +263,118 @@ class HorseRacingPredictor:
     def _heuristic_predict(
         self, meet: str, date: str, race_no: int, entries: list[dict],
     ) -> dict:
-        scores = []
+        """
+        heuristic-2.0: 종합 분석 기반 예측
+        - 레이팅 점수 (25점)
+        - 성적 점수 (25점)
+        - 기수 점수 (20점)
+        - 거리/전개 점수 (15점)
+        - 컨디션 점수 (15점)
+        """
+        horse_data = []
         for e in entries:
-            score = 10.0
             rating = _safe_float(e.get("rating", 0))
             total_races = _safe_int(e.get("rcCntT") or e.get("totalCnt", 0))
             win_cnt = _safe_int(e.get("ord1CntT") or e.get("ord1Cnt", 0))
             place_cnt = _safe_int(e.get("ord2CntT") or e.get("ord2Cnt", 0))
             recent_prize = _safe_int(e.get("chaksunY") or e.get("recentPrz", 0))
+            total_prize = _safe_int(e.get("chaksunT") or e.get("totalPrz", 0))
             weight = _safe_float(e.get("wgBudam", e.get("wght", 54)))
+            age = _safe_int(e.get("age", 4))
 
-            if rating > 0:
-                score += rating * 0.3
-            if total_races > 0:
-                score += (win_cnt / total_races) * 50
-                score += (place_cnt / total_races) * 20
-            if recent_prize > 0:
-                score += min(recent_prize / 100000, 20)
-            score -= (weight - 54) * 0.3
-            score = max(score, 1)
-            scores.append(score)
+            win_rate = (win_cnt / total_races * 100) if total_races > 0 else 0
+            place_rate = ((win_cnt + place_cnt) / total_races * 100) if total_races > 0 else 0
+
+            running_style = "중단"
+            if rating >= 85 and win_rate >= 20:
+                running_style = "선행"
+            elif rating >= 70:
+                running_style = "선입"
+            elif rating < 50:
+                running_style = "후입"
+
+            horse_data.append({
+                "entry": e,
+                "rating": rating,
+                "total_races": total_races,
+                "win_cnt": win_cnt,
+                "place_cnt": place_cnt,
+                "win_rate": win_rate,
+                "place_rate": place_rate,
+                "recent_prize": recent_prize,
+                "total_prize": total_prize,
+                "weight": weight,
+                "age": age,
+                "running_style": running_style,
+            })
+
+        ratings = [h["rating"] for h in horse_data]
+        max_rating = max(ratings) if ratings else 100
+        
+        front_runners = sum(1 for h in horse_data if h["running_style"] in ["선행", "선입"])
+        closers = sum(1 for h in horse_data if h["running_style"] in ["후입"])
+        pace_favors_closers = front_runners >= 4
+        pace_favors_front = front_runners <= 1
+
+        scores = []
+        for h in horse_data:
+            score = 0.0
+
+            if max_rating > 0:
+                rating_score = (h["rating"] / max_rating) * 25
+            else:
+                rating_score = 12.5
+            score += rating_score
+
+            perf_score = 0
+            if h["win_rate"] >= 25:
+                perf_score = 25
+            elif h["win_rate"] >= 15:
+                perf_score = 20
+            elif h["place_rate"] >= 40:
+                perf_score = 18
+            elif h["place_rate"] >= 25:
+                perf_score = 12
+            elif h["total_races"] > 0:
+                perf_score = 5
+            score += perf_score
+
+            jockey_score = 10
+            if h["recent_prize"] > 500000:
+                jockey_score = 20
+            elif h["recent_prize"] > 200000:
+                jockey_score = 15
+            score += jockey_score
+
+            pace_score = 8
+            if pace_favors_closers and h["running_style"] in ["후입", "중단"]:
+                pace_score = 15
+            elif pace_favors_front and h["running_style"] in ["선행", "선입"]:
+                pace_score = 15
+            score += pace_score
+
+            cond_score = 8
+            if 3 <= h["age"] <= 5:
+                cond_score += 3
+            if 52 <= h["weight"] <= 55:
+                cond_score += 2
+            if h["total_races"] >= 5 and h["win_cnt"] >= 1:
+                cond_score += 2
+            score += min(cond_score, 15)
+
+            scores.append(max(score, 5))
 
         total = sum(scores)
         predictions = []
-        for i, e in enumerate(entries):
+        for i, h in enumerate(horse_data):
+            e = h["entry"]
             horse_no = _safe_int(e.get("chulNo"))
             horse_name = str(e.get("hrName", e.get("hrNm", ""))).strip()
             jockey_name = str(e.get("jkName", e.get("jkNm", ""))).strip()
 
             win_p = (scores[i] / total * 100) if total > 0 else 0
-            place_p = min(win_p * 2.2, 95)
-            tags = self._generate_tags(e, win_p)
+            place_p = min(win_p * 2.0 + 5, 95)
+            tags = self._generate_tags_v2(h, win_p, pace_favors_closers, pace_favors_front)
 
             predictions.append({
                 "horse_no": horse_no,
@@ -302,7 +383,11 @@ class HorseRacingPredictor:
                 "win_probability": round(win_p, 2),
                 "place_probability": round(place_p, 2),
                 "tags": tags,
-                "feature_importance": {},
+                "feature_importance": {
+                    "rating": round(h["rating"], 1),
+                    "win_rate": round(h["win_rate"], 1),
+                    "running_style": h["running_style"],
+                },
             })
 
         predictions.sort(key=lambda x: -x["win_probability"])
@@ -312,9 +397,42 @@ class HorseRacingPredictor:
             "meet": meet,
             "race_no": race_no,
             "predictions": predictions,
-            "model_version": "heuristic-1.0",
+            "model_version": "heuristic-2.0",
             "generated_at": datetime.now().isoformat(),
         }
+
+    def _generate_tags_v2(
+        self, h: dict, win_prob: float, 
+        pace_favors_closers: bool, pace_favors_front: bool
+    ) -> list[str]:
+        tags = []
+        
+        if h["rating"] >= 80:
+            tags.append("고레이팅")
+        if h["win_rate"] >= 20:
+            tags.append("고승률")
+        if h["place_rate"] >= 40 and h["win_rate"] < 20:
+            tags.append("안정적입상")
+        if h["total_races"] >= 15:
+            tags.append("경험마")
+        if h["recent_prize"] > 300000:
+            tags.append("최근호조")
+        if h["weight"] <= 53:
+            tags.append("경량")
+        if win_prob >= 15:
+            tags.append("유력후보")
+        
+        if pace_favors_closers and h["running_style"] in ["후입", "중단"]:
+            tags.append("전개유리")
+        elif pace_favors_front and h["running_style"] in ["선행", "선입"]:
+            tags.append("전개유리")
+        
+        if h["running_style"] == "선행":
+            tags.append("선행마")
+        elif h["running_style"] == "후입":
+            tags.append("추입마")
+            
+        return tags
 
     # ------------------------------------------------------------------
     # 유틸

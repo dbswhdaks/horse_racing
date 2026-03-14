@@ -70,35 +70,62 @@ class HorseDetailScreen extends ConsumerWidget {
                     // 1) 프로필 카드
                     if (entry != null) _ProfileCard(entry: entry!),
 
-                    // 2) 성적 요약
-                    _StatsOverview(results: results, entry: entry),
-
-                    // 3) 순위 추이 차트
-                    if (results.length >= 2) ...[
-                      const _SectionTitle('순위 추이'),
-                      _RankChart(results: results),
+                    // 2) 레이팅
+                    if (entry != null && entry!.rating > 0) ...[
+                      const _SectionTitle('레이팅'),
+                      _RatingGauge(entry: entry!, results: results),
                     ],
 
-                    // 4) 거리별 성적
+                    // 3) 훈련 컨디션
                     if (results.isNotEmpty) ...[
-                      const _SectionTitle('거리별 성적'),
-                      _DistanceStats(results: results),
+                      const _SectionTitle('훈련 컨디션'),
+                      _TrainingCondition(results: results),
                     ],
 
-                    // 5) S1F / G3F 차트
+                    // 4) 최근 5경주 성적
+                    if (results.isNotEmpty) ...[
+                      const _SectionTitle('최근 5경주 성적'),
+                      _Recent5Races(results: results),
+                    ],
+
+                    // 4) 부담중량 분석
+                    if (results.isNotEmpty) ...[
+                      const _SectionTitle('부담중량'),
+                      _WeightAnalysis(results: results, currentWeight: entry?.weight),
+                    ],
+
+                    // 5) 거리 적성
+                    if (results.isNotEmpty) ...[
+                      const _SectionTitle('거리 적성'),
+                      _DistanceAptitude(results: results),
+                    ],
+
+                    // 6) 기수 승률
+                    if (results.isNotEmpty) ...[
+                      const _SectionTitle('기수 승률'),
+                      _JockeyWinRate(results: results, currentJockey: entry?.jockeyName),
+                    ],
+
+                    // 7) 마체중 변화
+                    if (results.where((r) => r.horseWeight > 0).length >= 2) ...[
+                      const _SectionTitle('마체중 변화'),
+                      _HorseWeightTrend(results: results, currentWeight: entry?.horseWeight),
+                    ],
+
+                    // 8) 최근 성적 추이 그래프
+                    if (results.length >= 2) ...[
+                      const _SectionTitle('성적 추이 그래프'),
+                      _RecentPerformanceChart(results: results),
+                    ],
+
+                    // 9) S1F / G3F 차트
                     if (results.any((r) =>
                         r.s1f.isNotEmpty && r.s1f != '0' && r.s1f != '0.0')) ...[
                       const _SectionTitle('구간 기록 (S1F / G3F)'),
                       _SplitTimesChart(results: results),
                     ],
 
-                    // 6) 기수별 성적
-                    if (results.isNotEmpty) ...[
-                      const _SectionTitle('기수별 성적'),
-                      _JockeyStats(results: results),
-                    ],
-
-                    // 7) 전체 경주 기록
+                    // 10) 전체 경주 기록
                     _SectionTitle(
                       results.isEmpty
                           ? '경주 기록'
@@ -418,150 +445,697 @@ class _VDivider extends StatelessWidget {
   }
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━ Rank Chart ━━━━━━━━━━━━━━━━━━━━━━━
+// ━━━━━━━━━━━━━━━━━━━━━━━ Training Condition ━━━━━━━━━━━━━━━━━━━━━━━
 
-class _RankChart extends StatelessWidget {
+class _TrainingCondition extends StatelessWidget {
   final List<RaceResult> results;
-  const _RankChart({required this.results});
+  const _TrainingCondition({required this.results});
 
   @override
   Widget build(BuildContext context) {
-    final recent =
-        results.where((r) => r.rank > 0).take(15).toList().reversed.toList();
-    if (recent.length < 2) {
+    final analysis = _analyzeCondition();
+
+    final conditionColor = analysis.overall == '좋음'
+        ? AppTheme.positiveGreen
+        : analysis.overall == '보통'
+            ? Colors.orangeAccent
+            : Colors.redAccent;
+
+    final conditionIcon = analysis.overall == '좋음'
+        ? Icons.trending_up_rounded
+        : analysis.overall == '보통'
+            ? Icons.trending_flat_rounded
+            : Icons.trending_down_rounded;
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppTheme.cardDark,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: conditionColor.withValues(alpha: 0.15),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(conditionIcon, size: 32, color: conditionColor),
+              ),
+              const SizedBox(width: 16),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '컨디션',
+                    style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
+                  ),
+                  Text(
+                    analysis.overall,
+                    style: TextStyle(
+                      fontSize: 28,
+                      fontWeight: FontWeight.w900,
+                      color: conditionColor,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+          const SizedBox(height: 20),
+          Row(
+            children: [
+              Expanded(
+                child: _ConditionIndicator(
+                  label: '기록 추이',
+                  value: analysis.recordTrend,
+                  isPositive: analysis.isRecordImproving,
+                  icon: analysis.isRecordImproving
+                      ? Icons.arrow_upward_rounded
+                      : analysis.recordTrend == '유지'
+                          ? Icons.remove_rounded
+                          : Icons.arrow_downward_rounded,
+                ),
+              ),
+              Container(width: 1, height: 50, color: Colors.grey.shade800),
+              Expanded(
+                child: _ConditionIndicator(
+                  label: '훈련량',
+                  value: analysis.trainingVolume,
+                  isPositive: analysis.isTrainingActive,
+                  icon: analysis.isTrainingActive
+                      ? Icons.fitness_center_rounded
+                      : Icons.hotel_rounded,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: conditionColor.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: conditionColor.withValues(alpha: 0.2)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(Icons.lightbulb_outline_rounded,
+                        size: 16, color: conditionColor),
+                    const SizedBox(width: 6),
+                    Text(
+                      '분석',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: conditionColor,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  analysis.comment,
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: Colors.grey.shade300,
+                    height: 1.4,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (analysis.details.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 6,
+              children: analysis.details.map((detail) {
+                final isPositive = detail.startsWith('+') || detail.contains('상승') || detail.contains('활발');
+                return Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: isPositive
+                        ? AppTheme.positiveGreen.withValues(alpha: 0.1)
+                        : Colors.redAccent.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        isPositive ? Icons.check_circle_outline : Icons.warning_amber_rounded,
+                        size: 14,
+                        color: isPositive ? AppTheme.positiveGreen : Colors.redAccent,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        detail,
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: isPositive ? AppTheme.positiveGreen : Colors.redAccent,
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }).toList(),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  _ConditionAnalysis _analyzeCondition() {
+    final details = <String>[];
+    
+    bool isRecordImproving = false;
+    String recordTrend = '데이터 부족';
+    bool isTrainingActive = false;
+    String trainingVolume = '데이터 부족';
+    String overall = '보통';
+    String comment = '';
+
+    final withTime = results.where((r) => 
+        r.raceTime.isNotEmpty && 
+        r.raceTime != '0' && 
+        r.raceTime.contains(':') &&
+        r.distance > 0
+    ).take(5).toList();
+
+    if (withTime.length >= 2) {
+      final distanceGroups = <int, List<RaceResult>>{};
+      for (final r in withTime) {
+        distanceGroups.putIfAbsent(r.distance, () => []).add(r);
+      }
+
+      double totalChange = 0;
+      int comparisonCount = 0;
+
+      for (final group in distanceGroups.values) {
+        if (group.length >= 2) {
+          final recent = _parseTime(group[0].raceTime);
+          final previous = _parseTime(group[1].raceTime);
+          if (recent != null && previous != null) {
+            totalChange += previous - recent;
+            comparisonCount++;
+          }
+        }
+      }
+
+      if (comparisonCount > 0) {
+        final avgChange = totalChange / comparisonCount;
+        if (avgChange > 0.5) {
+          isRecordImproving = true;
+          recordTrend = '상승';
+          details.add('기록 ${avgChange.toStringAsFixed(1)}초 단축');
+        } else if (avgChange < -0.5) {
+          isRecordImproving = false;
+          recordTrend = '하락';
+          details.add('기록 ${(-avgChange).toStringAsFixed(1)}초 증가');
+        } else {
+          recordTrend = '유지';
+        }
+      }
+    }
+
+    final now = DateTime.now();
+    final recentRaces = results.where((r) {
+      if (r.raceDate.length < 8) return false;
+      try {
+        final y = int.parse(r.raceDate.substring(0, 4));
+        final m = int.parse(r.raceDate.substring(4, 6));
+        final d = int.parse(r.raceDate.substring(6, 8));
+        final raceDate = DateTime(y, m, d);
+        return now.difference(raceDate).inDays <= 60;
+      } catch (_) {
+        return false;
+      }
+    }).length;
+
+    if (recentRaces >= 3) {
+      isTrainingActive = true;
+      trainingVolume = '활발';
+      details.add('최근 2개월 ${recentRaces}회 출주');
+    } else if (recentRaces >= 1) {
+      isTrainingActive = true;
+      trainingVolume = '보통';
+    } else {
+      isTrainingActive = false;
+      trainingVolume = '부족';
+      details.add('최근 2개월 출주 없음');
+    }
+
+    final recentRanks = results.take(3).where((r) => r.rank > 0).map((r) => r.rank).toList();
+    if (recentRanks.isNotEmpty) {
+      final avgRank = recentRanks.reduce((a, b) => a + b) / recentRanks.length;
+      if (avgRank <= 3) {
+        details.add('최근 평균 ${avgRank.toStringAsFixed(1)}착');
+      }
+    }
+
+    int positiveCount = 0;
+    int negativeCount = 0;
+
+    if (isRecordImproving) positiveCount++;
+    if (recordTrend == '하락') negativeCount++;
+    if (isTrainingActive && trainingVolume == '활발') positiveCount++;
+    if (!isTrainingActive || trainingVolume == '부족') negativeCount++;
+
+    if (positiveCount >= 2 && negativeCount == 0) {
+      overall = '좋음';
+      comment = '기록이 상승세이며 훈련량도 충분합니다. 좋은 컨디션으로 기대할 수 있습니다.';
+    } else if (negativeCount >= 2) {
+      overall = '주의';
+      comment = '기록이 하락하거나 훈련량이 부족합니다. 컨디션 회복이 필요해 보입니다.';
+    } else if (positiveCount > negativeCount) {
+      overall = '좋음';
+      comment = '전반적으로 양호한 컨디션입니다.';
+    } else if (negativeCount > positiveCount) {
+      overall = '주의';
+      comment = '컨디션에 다소 우려가 있습니다.';
+    } else {
+      overall = '보통';
+      comment = '평균적인 컨디션 상태입니다. 당일 상태를 확인하세요.';
+    }
+
+    if (results.isEmpty) {
+      overall = '보통';
+      comment = '경주 기록이 없어 컨디션을 판단하기 어렵습니다.';
+    }
+
+    return _ConditionAnalysis(
+      overall: overall,
+      recordTrend: recordTrend,
+      isRecordImproving: isRecordImproving,
+      trainingVolume: trainingVolume,
+      isTrainingActive: isTrainingActive,
+      comment: comment,
+      details: details,
+    );
+  }
+
+  double? _parseTime(String timeStr) {
+    try {
+      final parts = timeStr.split(':');
+      if (parts.length == 2) {
+        final minutes = int.parse(parts[0]);
+        final seconds = double.parse(parts[1]);
+        return minutes * 60 + seconds;
+      }
+    } catch (_) {}
+    return null;
+  }
+}
+
+class _ConditionAnalysis {
+  final String overall;
+  final String recordTrend;
+  final bool isRecordImproving;
+  final String trainingVolume;
+  final bool isTrainingActive;
+  final String comment;
+  final List<String> details;
+
+  _ConditionAnalysis({
+    required this.overall,
+    required this.recordTrend,
+    required this.isRecordImproving,
+    required this.trainingVolume,
+    required this.isTrainingActive,
+    required this.comment,
+    required this.details,
+  });
+}
+
+class _ConditionIndicator extends StatelessWidget {
+  final String label;
+  final String value;
+  final bool isPositive;
+  final IconData icon;
+
+  const _ConditionIndicator({
+    required this.label,
+    required this.value,
+    required this.isPositive,
+    required this.icon,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final color = value == '데이터 부족'
+        ? Colors.grey
+        : isPositive
+            ? AppTheme.positiveGreen
+            : value == '유지' || value == '보통'
+                ? Colors.orangeAccent
+                : Colors.redAccent;
+
+    return Column(
+      children: [
+        Icon(icon, size: 24, color: color),
+        const SizedBox(height: 6),
+        Text(
+          value,
+          style: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.w800,
+            color: color,
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          label,
+          style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
+        ),
+      ],
+    );
+  }
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━ Recent 5 Races ━━━━━━━━━━━━━━━━━━━━━━━
+
+class _Recent5Races extends StatelessWidget {
+  final List<RaceResult> results;
+  const _Recent5Races({required this.results});
+
+  @override
+  Widget build(BuildContext context) {
+    final recent = results.take(5).toList();
+    if (recent.isEmpty) {
       return const Padding(
         padding: EdgeInsets.all(16),
-        child: Text('데이터가 부족합니다'),
+        child: Text('경주 기록이 없습니다'),
       );
     }
 
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16),
-      height: 220,
-      padding: const EdgeInsets.fromLTRB(8, 16, 16, 8),
       decoration: BoxDecoration(
         color: AppTheme.cardDark,
         borderRadius: BorderRadius.circular(16),
       ),
-      child: LineChart(
-        LineChartData(
-          minY: 0.5,
-          maxY: 14.5,
-          gridData: FlGridData(
-            show: true,
-            drawVerticalLine: false,
-            horizontalInterval: 3,
-            getDrawingHorizontalLine: (value) => FlLine(
-              color: Colors.grey.shade800,
-              strokeWidth: 0.5,
-            ),
-          ),
-          titlesData: FlTitlesData(
-            topTitles:
-                const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-            rightTitles:
-                const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-            bottomTitles: AxisTitles(
-              sideTitles: SideTitles(
-                showTitles: true,
-                interval: 1,
-                getTitlesWidget: (value, meta) {
-                  final idx = value.toInt();
-                  if (idx < 0 || idx >= recent.length) {
-                    return const SizedBox.shrink();
-                  }
-                  final date = recent[idx].raceDate;
-                  final label = date.length >= 8
-                      ? '${date.substring(4, 6)}/${date.substring(6, 8)}'
-                      : '$idx';
-                  return Padding(
-                    padding: const EdgeInsets.only(top: 6),
-                    child: Text(label,
-                        style: TextStyle(
-                            fontSize: 9, color: Colors.grey.shade500)),
-                  );
-                },
-              ),
-            ),
-            leftTitles: AxisTitles(
-              sideTitles: SideTitles(
-                showTitles: true,
-                reservedSize: 28,
-                interval: 3,
-                getTitlesWidget: (value, meta) => Text(
-                  '${value.toInt()}',
-                  style:
-                      TextStyle(fontSize: 11, color: Colors.grey.shade500),
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 12, 14, 8),
+            child: Row(
+              children: [
+                const SizedBox(width: 44),
+                Expanded(
+                  child: Text('날짜', textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 10, color: Colors.grey.shade500)),
                 ),
-              ),
+                Expanded(
+                  child: Text('거리', textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 10, color: Colors.grey.shade500)),
+                ),
+                Expanded(
+                  child: Text('순위', textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 10, color: Colors.grey.shade500)),
+                ),
+                Expanded(
+                  child: Text('기록', textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 10, color: Colors.grey.shade500)),
+                ),
+                Expanded(
+                  child: Text('배당', textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 10, color: Colors.grey.shade500)),
+                ),
+              ],
             ),
           ),
-          borderData: FlBorderData(show: false),
-          lineBarsData: [
-            LineChartBarData(
-              spots: recent.asMap().entries.map((e) {
-                final rank =
-                    e.value.rank > 0 ? e.value.rank.toDouble() : 14.0;
-                return FlSpot(e.key.toDouble(), rank);
-              }).toList(),
-              isCurved: true,
-              color: AppTheme.accentGold,
-              barWidth: 3,
-              dotData: FlDotData(
-                show: true,
-                getDotPainter: (spot, pct, bar, idx) {
-                  Color c;
-                  double r;
-                  if (spot.y == 1) {
-                    c = AppTheme.winColor;
-                    r = 6;
-                  } else if (spot.y <= 3) {
-                    c = AppTheme.placeColor;
-                    r = 4;
-                  } else {
-                    c = AppTheme.accentGold;
-                    r = 3;
-                  }
-                  return FlDotCirclePainter(
-                    radius: r,
-                    color: c,
-                    strokeColor: Colors.transparent,
-                  );
-                },
+          const Divider(height: 1, color: Colors.grey),
+          ...recent.asMap().entries.map((e) {
+            final idx = e.key;
+            final r = e.value;
+            final isTop3 = r.rank >= 1 && r.rank <= 3;
+            final rankColor = r.rank == 1
+                ? AppTheme.winColor
+                : r.rank == 2
+                    ? AppTheme.placeColor
+                    : r.rank == 3
+                        ? AppTheme.showColor
+                        : Colors.grey.shade400;
+
+            return Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: isTop3 ? rankColor.withValues(alpha: 0.05) : null,
+                border: idx < recent.length - 1
+                    ? Border(bottom: BorderSide(color: Colors.grey.shade800, width: 0.5))
+                    : null,
               ),
-              belowBarData: BarAreaData(
-                show: true,
-                color: AppTheme.accentGold.withValues(alpha: 0.08),
+              child: Row(
+                children: [
+                  Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      color: rankColor.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Center(
+                      child: Text(
+                        r.rank > 0 ? '${r.rank}' : '-',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w900,
+                          color: rankColor,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      r.raceDate.length >= 8
+                          ? '${r.raceDate.substring(4, 6)}/${r.raceDate.substring(6, 8)}'
+                          : r.raceDate,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                  Expanded(
+                    child: Text(
+                      r.distance > 0 ? '${r.distance}m' : '-',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 12, color: Colors.grey.shade300),
+                    ),
+                  ),
+                  Expanded(
+                    child: Text(
+                      r.rank > 0 ? '${r.rank}착' : r.rankRaw.isNotEmpty ? r.rankRaw : '-',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: rankColor,
+                      ),
+                    ),
+                  ),
+                  Expanded(
+                    child: Text(
+                      r.raceTime.isNotEmpty && r.raceTime != '0' ? r.raceTime : '-',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 11, color: Colors.grey.shade400),
+                    ),
+                  ),
+                  Expanded(
+                    child: Text(
+                      r.winOdds > 0 ? '${r.winOdds.toStringAsFixed(1)}' : '-',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: r.winOdds > 0 ? AppTheme.accentGold : Colors.grey.shade500,
+                      ),
+                    ),
+                  ),
+                ],
               ),
-            ),
-          ],
-          lineTouchData: LineTouchData(
-            touchTooltipData: LineTouchTooltipData(
-              getTooltipItems: (spots) => spots.map((spot) {
-                final idx = spot.x.toInt();
-                final r = idx < recent.length ? recent[idx] : null;
-                final date = r != null && r.raceDate.length >= 8
-                    ? '${r.raceDate.substring(4, 6)}/${r.raceDate.substring(6, 8)}'
-                    : '';
-                return LineTooltipItem(
-                  '$date ${spot.y.toInt()}착',
-                  const TextStyle(
-                      fontWeight: FontWeight.w700, fontSize: 12),
-                );
-              }).toList(),
-            ),
-          ),
-        ),
+            );
+          }),
+        ],
       ),
     );
   }
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━ Distance Stats ━━━━━━━━━━━━━━━━━━━━━━━
+// ━━━━━━━━━━━━━━━━━━━━━━━ Weight Analysis ━━━━━━━━━━━━━━━━━━━━━━━
 
-class _DistanceStats extends StatelessWidget {
+class _WeightAnalysis extends StatelessWidget {
   final List<RaceResult> results;
-  const _DistanceStats({required this.results});
+  final double? currentWeight;
+  const _WeightAnalysis({required this.results, this.currentWeight});
+
+  @override
+  Widget build(BuildContext context) {
+    final withWeight = results.where((r) => r.weight > 0).toList();
+    if (withWeight.isEmpty) {
+      return const Padding(
+        padding: EdgeInsets.all(16),
+        child: Text('부담중량 데이터가 없습니다'),
+      );
+    }
+
+    final weightMap = <String, _WeightStat>{};
+    for (final r in withWeight) {
+      final range = _getWeightRange(r.weight);
+      final stat = weightMap.putIfAbsent(range, () => _WeightStat(range, r.weight));
+      stat.total++;
+      if (r.rank == 1) stat.wins++;
+      if (r.rank >= 1 && r.rank <= 3) stat.places++;
+      if (r.rank > 0) {
+        stat.totalRank += r.rank;
+        stat.rankedCount++;
+      }
+    }
+
+    final sorted = weightMap.values.toList()
+      ..sort((a, b) => a.avgWeight.compareTo(b.avgWeight));
+
+    final currentRange = currentWeight != null ? _getWeightRange(currentWeight!) : null;
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppTheme.cardDark,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        children: [
+          if (currentWeight != null) ...[
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(
+                  '현재 부담중량: ',
+                  style: TextStyle(fontSize: 13, color: Colors.grey.shade400),
+                ),
+                Text(
+                  '${currentWeight!.toStringAsFixed(1)}kg',
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w900,
+                    color: AppTheme.primaryGreen,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            const Divider(height: 1),
+            const SizedBox(height: 12),
+          ],
+          ...sorted.map((stat) {
+            final winRate = stat.total > 0 ? stat.wins / stat.total * 100 : 0.0;
+            final placeRate = stat.total > 0 ? stat.places / stat.total * 100 : 0.0;
+            final avgRank = stat.rankedCount > 0 ? stat.totalRank / stat.rankedCount : 0.0;
+            final isCurrent = stat.range == currentRange;
+
+            return Container(
+              margin: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: isCurrent
+                    ? AppTheme.primaryGreen.withValues(alpha: 0.1)
+                    : Colors.white.withValues(alpha: 0.03),
+                borderRadius: BorderRadius.circular(10),
+                border: isCurrent
+                    ? Border.all(color: AppTheme.primaryGreen.withValues(alpha: 0.3))
+                    : null,
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 70,
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: isCurrent
+                          ? AppTheme.primaryGreen.withValues(alpha: 0.2)
+                          : Colors.grey.shade800,
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(
+                      stat.range,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: isCurrent ? AppTheme.primaryGreen : Colors.grey.shade300,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                      children: [
+                        _MiniStat('출주', '${stat.total}회', Colors.grey.shade300),
+                        _MiniStat(
+                          '승률',
+                          '${winRate.toStringAsFixed(0)}%',
+                          winRate > 0 ? AppTheme.positiveGreen : Colors.grey.shade500,
+                        ),
+                        _MiniStat(
+                          'TOP3',
+                          '${placeRate.toStringAsFixed(0)}%',
+                          placeRate > 0 ? Colors.cyanAccent : Colors.grey.shade500,
+                        ),
+                        _MiniStat(
+                          '평균',
+                          avgRank > 0 ? '${avgRank.toStringAsFixed(1)}착' : '-',
+                          avgRank > 0 && avgRank <= 3 ? AppTheme.accentGold : Colors.grey.shade400,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }),
+        ],
+      ),
+    );
+  }
+
+  String _getWeightRange(double weight) {
+    if (weight < 52) return '~51kg';
+    if (weight < 54) return '52-53kg';
+    if (weight < 56) return '54-55kg';
+    if (weight < 58) return '56-57kg';
+    return '58kg~';
+  }
+}
+
+class _WeightStat {
+  final String range;
+  final double avgWeight;
+  int total = 0;
+  int wins = 0;
+  int places = 0;
+  int totalRank = 0;
+  int rankedCount = 0;
+  _WeightStat(this.range, this.avgWeight);
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━ Distance Aptitude ━━━━━━━━━━━━━━━━━━━━━━━
+
+class _DistanceAptitude extends StatelessWidget {
+  final List<RaceResult> results;
+  const _DistanceAptitude({required this.results});
 
   @override
   Widget build(BuildContext context) {
@@ -588,80 +1162,381 @@ class _DistanceStats extends StatelessWidget {
       );
     }
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Column(
-        children: sorted.map((stat) {
-          final winRate =
-              stat.total > 0 ? (stat.wins / stat.total * 100) : 0.0;
-          final placeRate =
-              stat.total > 0 ? (stat.places / stat.total * 100) : 0.0;
-          final avgRank =
-              stat.rankedCount > 0 ? stat.totalRank / stat.rankedCount : 0.0;
+    final bestDistance = sorted.reduce((a, b) {
+      final aRate = a.total > 0 ? a.wins / a.total : 0;
+      final bRate = b.total > 0 ? b.wins / b.total : 0;
+      if (aRate != bRate) return aRate > bRate ? a : b;
+      return a.places > b.places ? a : b;
+    });
 
-          return Container(
-            margin: const EdgeInsets.only(bottom: 6),
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            decoration: BoxDecoration(
-              color: AppTheme.cardDark,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Row(
-              children: [
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: AppTheme.primaryGreen.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(8),
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppTheme.cardDark,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.star_rounded, size: 18, color: AppTheme.winColor),
+              const SizedBox(width: 6),
+              Text(
+                '최적 거리: ',
+                style: TextStyle(fontSize: 13, color: Colors.grey.shade400),
+              ),
+              Text(
+                '${bestDistance.distance}m',
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w900,
+                  color: AppTheme.winColor,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          const Divider(height: 1),
+          const SizedBox(height: 12),
+          ...sorted.map((stat) {
+            final winRate = stat.total > 0 ? (stat.wins / stat.total * 100) : 0.0;
+            final placeRate = stat.total > 0 ? (stat.places / stat.total * 100) : 0.0;
+            final isBest = stat.distance == bestDistance.distance;
+
+            return Container(
+              margin: const EdgeInsets.only(bottom: 8),
+              child: Row(
+                children: [
+                  Container(
+                    width: 70,
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: isBest
+                          ? AppTheme.winColor.withValues(alpha: 0.15)
+                          : AppTheme.primaryGreen.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(8),
+                      border: isBest
+                          ? Border.all(color: AppTheme.winColor.withValues(alpha: 0.3))
+                          : null,
+                    ),
+                    child: Text(
+                      '${stat.distance}m',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w800,
+                        color: isBest ? AppTheme.winColor : AppTheme.primaryGreen,
+                      ),
+                    ),
                   ),
-                  child: Text(
-                    '${stat.distance}m',
-                    style: const TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w800,
-                      color: AppTheme.primaryGreen,
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Text(
+                              '${stat.total}전 ${stat.wins}승 ${stat.places - stat.wins}복',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: isBest ? Colors.white : Colors.grey.shade400,
+                              ),
+                            ),
+                            const Spacer(),
+                            if (isBest)
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: AppTheme.winColor.withValues(alpha: 0.2),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: const Text(
+                                  '최적',
+                                  style: TextStyle(
+                                    fontSize: 9,
+                                    fontWeight: FontWeight.w700,
+                                    color: AppTheme.winColor,
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(3),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                flex: (winRate * 10).toInt().clamp(1, 1000),
+                                child: Container(height: 6, color: AppTheme.winColor),
+                              ),
+                              Expanded(
+                                flex: ((placeRate - winRate) * 10).toInt().clamp(0, 1000),
+                                child: Container(height: 6, color: AppTheme.placeColor),
+                              ),
+                              Expanded(
+                                flex: ((100 - placeRate) * 10).toInt().clamp(1, 1000),
+                                child: Container(height: 6, color: Colors.grey.shade700),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Text(
+                    '${winRate.toStringAsFixed(0)}%',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w900,
+                      color: winRate > 0
+                          ? (isBest ? AppTheme.winColor : AppTheme.positiveGreen)
+                          : Colors.grey.shade500,
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }),
+        ],
+      ),
+    );
+  }
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━ Horse Weight Trend ━━━━━━━━━━━━━━━━━━━━━━━
+
+class _HorseWeightTrend extends StatelessWidget {
+  final List<RaceResult> results;
+  final double? currentWeight;
+  const _HorseWeightTrend({required this.results, this.currentWeight});
+
+  @override
+  Widget build(BuildContext context) {
+    final withWeight = results.where((r) => r.horseWeight > 0).take(10).toList().reversed.toList();
+    if (withWeight.length < 2) {
+      return const Padding(
+        padding: EdgeInsets.all(16),
+        child: Text('마체중 데이터가 부족합니다'),
+      );
+    }
+
+    final weights = withWeight.map((r) => r.horseWeight).toList();
+    final minWeight = weights.reduce((a, b) => a < b ? a : b) - 5;
+    final maxWeight = weights.reduce((a, b) => a > b ? a : b) + 5;
+    final avgWeight = weights.reduce((a, b) => a + b) / weights.length;
+
+    final recentChange = withWeight.length >= 2
+        ? withWeight.last.horseWeight - withWeight[withWeight.length - 2].horseWeight
+        : 0.0;
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppTheme.cardDark,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: [
+              _WeightStatItem(
+                label: '현재',
+                value: currentWeight != null
+                    ? '${currentWeight!.toStringAsFixed(0)}kg'
+                    : '${withWeight.last.horseWeight.toStringAsFixed(0)}kg',
+                color: AppTheme.primaryGreen,
+              ),
+              Container(width: 1, height: 30, color: Colors.grey.shade700),
+              _WeightStatItem(
+                label: '평균',
+                value: '${avgWeight.toStringAsFixed(0)}kg',
+                color: Colors.cyanAccent,
+              ),
+              Container(width: 1, height: 30, color: Colors.grey.shade700),
+              _WeightStatItem(
+                label: '변화',
+                value: recentChange >= 0
+                    ? '+${recentChange.toStringAsFixed(0)}kg'
+                    : '${recentChange.toStringAsFixed(0)}kg',
+                color: recentChange > 0
+                    ? Colors.redAccent
+                    : recentChange < 0
+                        ? Colors.blueAccent
+                        : Colors.grey,
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          SizedBox(
+            height: 160,
+            child: LineChart(
+              LineChartData(
+                minY: minWeight,
+                maxY: maxWeight,
+                gridData: FlGridData(
+                  show: true,
+                  drawVerticalLine: false,
+                  horizontalInterval: 5,
+                  getDrawingHorizontalLine: (value) => FlLine(
+                    color: Colors.grey.shade800,
+                    strokeWidth: 0.5,
+                  ),
+                ),
+                titlesData: FlTitlesData(
+                  topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                  rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                  bottomTitles: AxisTitles(
+                    sideTitles: SideTitles(
+                      showTitles: true,
+                      interval: 1,
+                      getTitlesWidget: (value, meta) {
+                        final idx = value.toInt();
+                        if (idx < 0 || idx >= withWeight.length) return const SizedBox.shrink();
+                        final date = withWeight[idx].raceDate;
+                        final label = date.length >= 8
+                            ? '${date.substring(4, 6)}/${date.substring(6, 8)}'
+                            : '$idx';
+                        return Padding(
+                          padding: const EdgeInsets.only(top: 6),
+                          child: Text(label,
+                              style: TextStyle(fontSize: 9, color: Colors.grey.shade500)),
+                        );
+                      },
+                    ),
+                  ),
+                  leftTitles: AxisTitles(
+                    sideTitles: SideTitles(
+                      showTitles: true,
+                      reservedSize: 40,
+                      interval: 5,
+                      getTitlesWidget: (value, meta) => Text(
+                        '${value.toInt()}',
+                        style: TextStyle(fontSize: 10, color: Colors.grey.shade500),
+                      ),
                     ),
                   ),
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                    children: [
-                      _MiniStat(
-                          '출주', '${stat.total}회', Colors.grey.shade300),
-                      _MiniStat(
-                        '승률',
-                        '${winRate.toStringAsFixed(0)}%',
-                        winRate > 0
-                            ? AppTheme.positiveGreen
-                            : Colors.grey.shade500,
-                      ),
-                      _MiniStat(
-                        '입상',
-                        '${placeRate.toStringAsFixed(0)}%',
-                        placeRate > 0
-                            ? Colors.cyanAccent
-                            : Colors.grey.shade500,
-                      ),
-                      _MiniStat(
-                        '평균',
-                        avgRank > 0
-                            ? '${avgRank.toStringAsFixed(1)}착'
-                            : '-',
-                        avgRank > 0 && avgRank <= 3
-                            ? AppTheme.accentGold
-                            : Colors.grey.shade400,
-                      ),
-                    ],
+                borderData: FlBorderData(show: false),
+                lineBarsData: [
+                  LineChartBarData(
+                    spots: withWeight.asMap().entries.map((e) {
+                      return FlSpot(e.key.toDouble(), e.value.horseWeight);
+                    }).toList(),
+                    isCurved: true,
+                    color: Colors.orangeAccent,
+                    barWidth: 3,
+                    dotData: FlDotData(
+                      show: true,
+                      getDotPainter: (spot, pct, bar, idx) {
+                        final isLast = idx == withWeight.length - 1;
+                        return FlDotCirclePainter(
+                          radius: isLast ? 6 : 4,
+                          color: isLast ? AppTheme.primaryGreen : Colors.orangeAccent,
+                          strokeColor: Colors.white,
+                          strokeWidth: isLast ? 2 : 0,
+                        );
+                      },
+                    ),
+                    belowBarData: BarAreaData(
+                      show: true,
+                      color: Colors.orangeAccent.withValues(alpha: 0.1),
+                    ),
+                  ),
+                  LineChartBarData(
+                    spots: withWeight.asMap().entries.map((e) {
+                      return FlSpot(e.key.toDouble(), avgWeight);
+                    }).toList(),
+                    isCurved: false,
+                    color: Colors.cyanAccent.withValues(alpha: 0.5),
+                    barWidth: 1,
+                    dotData: const FlDotData(show: false),
+                    dashArray: [5, 5],
+                  ),
+                ],
+                lineTouchData: LineTouchData(
+                  touchTooltipData: LineTouchTooltipData(
+                    getTooltipItems: (spots) {
+                      final spot = spots.first;
+                      final idx = spot.x.toInt();
+                      if (idx < 0 || idx >= withWeight.length) return [];
+                      final r = withWeight[idx];
+                      final date = r.raceDate.length >= 8
+                          ? '${r.raceDate.substring(4, 6)}/${r.raceDate.substring(6, 8)}'
+                          : '';
+                      return [
+                        LineTooltipItem(
+                          '$date\n${r.horseWeight.toStringAsFixed(0)}kg',
+                          const TextStyle(fontWeight: FontWeight.w700, fontSize: 12),
+                        ),
+                      ];
+                    },
                   ),
                 ),
-              ],
+              ),
             ),
-          );
-        }).toList(),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                width: 10,
+                height: 3,
+                decoration: BoxDecoration(
+                  color: Colors.orangeAccent,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(width: 4),
+              Text('마체중', style: TextStyle(fontSize: 10, color: Colors.grey.shade500)),
+              const SizedBox(width: 16),
+              Container(
+                width: 10,
+                height: 2,
+                decoration: BoxDecoration(
+                  color: Colors.cyanAccent.withValues(alpha: 0.5),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(width: 4),
+              Text('평균', style: TextStyle(fontSize: 10, color: Colors.grey.shade500)),
+            ],
+          ),
+        ],
       ),
+    );
+  }
+}
+
+class _WeightStatItem extends StatelessWidget {
+  final String label;
+  final String value;
+  final Color color;
+  const _WeightStatItem({required this.label, required this.value, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Text(label, style: TextStyle(fontSize: 10, color: Colors.grey.shade500)),
+        const SizedBox(height: 2),
+        Text(
+          value,
+          style: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.w800,
+            color: color,
+          ),
+        ),
+      ],
     );
   }
 }
@@ -825,11 +1700,391 @@ class _SplitTimesChart extends StatelessWidget {
   }
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━ Jockey Stats ━━━━━━━━━━━━━━━━━━━━━━━
+// ━━━━━━━━━━━━━━━━━━━━━━━ Rating Gauge ━━━━━━━━━━━━━━━━━━━━━━━
 
-class _JockeyStats extends StatelessWidget {
+class _RatingGauge extends StatelessWidget {
+  final RaceEntry entry;
   final List<RaceResult> results;
-  const _JockeyStats({required this.results});
+  const _RatingGauge({required this.entry, required this.results});
+
+  @override
+  Widget build(BuildContext context) {
+    final rating = entry.rating;
+    final maxRating = 120.0;
+    final progress = (rating / maxRating).clamp(0.0, 1.0);
+
+    Color ratingColor;
+    String ratingLevel;
+    if (rating >= 100) {
+      ratingColor = AppTheme.winColor;
+      ratingLevel = '최상위';
+    } else if (rating >= 80) {
+      ratingColor = AppTheme.placeColor;
+      ratingLevel = '상위';
+    } else if (rating >= 60) {
+      ratingColor = Colors.cyanAccent;
+      ratingLevel = '중상위';
+    } else if (rating >= 40) {
+      ratingColor = Colors.orangeAccent;
+      ratingLevel = '중위';
+    } else {
+      ratingColor = Colors.grey;
+      ratingLevel = '하위';
+    }
+
+    final avgRank = results.isNotEmpty
+        ? results.where((r) => r.rank > 0).fold(0.0, (sum, r) => sum + r.rank) /
+            results.where((r) => r.rank > 0).length
+        : 0.0;
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppTheme.cardDark,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Text(
+                          rating.toStringAsFixed(0),
+                          style: TextStyle(
+                            fontSize: 42,
+                            fontWeight: FontWeight.w900,
+                            color: ratingColor,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: ratingColor.withValues(alpha: 0.2),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text(
+                            ratingLevel,
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                              color: ratingColor,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(6),
+                      child: LinearProgressIndicator(
+                        value: progress,
+                        minHeight: 10,
+                        backgroundColor: Colors.grey.shade800,
+                        valueColor: AlwaysStoppedAnimation<Color>(ratingColor),
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text('0', style: TextStyle(fontSize: 10, color: Colors.grey.shade600)),
+                        Text('40', style: TextStyle(fontSize: 10, color: Colors.grey.shade600)),
+                        Text('60', style: TextStyle(fontSize: 10, color: Colors.grey.shade600)),
+                        Text('80', style: TextStyle(fontSize: 10, color: Colors.grey.shade600)),
+                        Text('100', style: TextStyle(fontSize: 10, color: Colors.grey.shade600)),
+                        Text('120', style: TextStyle(fontSize: 10, color: Colors.grey.shade600)),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 16),
+              Container(
+                width: 80,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.05),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Column(
+                  children: [
+                    Text(
+                      '평균 순위',
+                      style: TextStyle(fontSize: 10, color: Colors.grey.shade500),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      avgRank > 0 ? '${avgRank.toStringAsFixed(1)}착' : '-',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w800,
+                        color: avgRank > 0 && avgRank <= 3
+                            ? AppTheme.positiveGreen
+                            : Colors.white,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━ Recent Performance Chart ━━━━━━━━━━━━━━━━━━━━━━━
+
+class _RecentPerformanceChart extends StatelessWidget {
+  final List<RaceResult> results;
+  const _RecentPerformanceChart({required this.results});
+
+  @override
+  Widget build(BuildContext context) {
+    final recent = results.where((r) => r.rank > 0).take(10).toList().reversed.toList();
+    if (recent.length < 2) {
+      return const Padding(
+        padding: EdgeInsets.all(16),
+        child: Text('데이터가 부족합니다'),
+      );
+    }
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppTheme.cardDark,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        children: [
+          SizedBox(
+            height: 200,
+            child: LineChart(
+              LineChartData(
+                minY: 0.5,
+                maxY: 12.5,
+                gridData: FlGridData(
+                  show: true,
+                  drawVerticalLine: false,
+                  horizontalInterval: 3,
+                  getDrawingHorizontalLine: (value) => FlLine(
+                    color: Colors.grey.shade800,
+                    strokeWidth: 0.5,
+                  ),
+                ),
+                titlesData: FlTitlesData(
+                  topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                  rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                  bottomTitles: AxisTitles(
+                    sideTitles: SideTitles(
+                      showTitles: true,
+                      interval: 1,
+                      getTitlesWidget: (value, meta) {
+                        final idx = value.toInt();
+                        if (idx < 0 || idx >= recent.length) return const SizedBox.shrink();
+                        final date = recent[idx].raceDate;
+                        final label = date.length >= 8
+                            ? '${date.substring(4, 6)}/${date.substring(6, 8)}'
+                            : '$idx';
+                        return Padding(
+                          padding: const EdgeInsets.only(top: 6),
+                          child: Text(label,
+                              style: TextStyle(fontSize: 9, color: Colors.grey.shade500)),
+                        );
+                      },
+                    ),
+                  ),
+                  leftTitles: AxisTitles(
+                    sideTitles: SideTitles(
+                      showTitles: true,
+                      reservedSize: 28,
+                      interval: 3,
+                      getTitlesWidget: (value, meta) => Text(
+                        '${value.toInt()}',
+                        style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
+                      ),
+                    ),
+                  ),
+                ),
+                borderData: FlBorderData(show: false),
+                lineBarsData: [
+                  LineChartBarData(
+                    spots: recent.asMap().entries.map((e) {
+                      return FlSpot(e.key.toDouble(), e.value.rank.toDouble());
+                    }).toList(),
+                    isCurved: true,
+                    color: AppTheme.accentGold,
+                    barWidth: 3,
+                    dotData: FlDotData(
+                      show: true,
+                      getDotPainter: (spot, pct, bar, idx) {
+                        Color c;
+                        double r;
+                        if (spot.y == 1) {
+                          c = AppTheme.winColor;
+                          r = 7;
+                        } else if (spot.y <= 3) {
+                          c = AppTheme.placeColor;
+                          r = 5;
+                        } else {
+                          c = AppTheme.accentGold;
+                          r = 4;
+                        }
+                        return FlDotCirclePainter(
+                          radius: r,
+                          color: c,
+                          strokeColor: Colors.white,
+                          strokeWidth: 1,
+                        );
+                      },
+                    ),
+                    belowBarData: BarAreaData(
+                      show: true,
+                      color: AppTheme.accentGold.withValues(alpha: 0.1),
+                    ),
+                  ),
+                ],
+                lineTouchData: LineTouchData(
+                  touchTooltipData: LineTouchTooltipData(
+                    getTooltipItems: (spots) => spots.map((spot) {
+                      final idx = spot.x.toInt();
+                      final r = idx < recent.length ? recent[idx] : null;
+                      final date = r != null && r.raceDate.length >= 8
+                          ? '${r.raceDate.substring(4, 6)}/${r.raceDate.substring(6, 8)}'
+                          : '';
+                      final odds = r != null && r.winOdds > 0 ? ' (${r.winOdds.toStringAsFixed(1)}배)' : '';
+                      return LineTooltipItem(
+                        '$date ${spot.y.toInt()}착$odds',
+                        const TextStyle(fontWeight: FontWeight.w700, fontSize: 12),
+                      );
+                    }).toList(),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              _LegendItem(color: AppTheme.winColor, label: '1착'),
+              const SizedBox(width: 16),
+              _LegendItem(color: AppTheme.placeColor, label: '2-3착'),
+              const SizedBox(width: 16),
+              _LegendItem(color: AppTheme.accentGold, label: '4착+'),
+            ],
+          ),
+          const SizedBox(height: 12),
+          _PerformanceSummary(results: recent),
+        ],
+      ),
+    );
+  }
+}
+
+class _LegendItem extends StatelessWidget {
+  final Color color;
+  final String label;
+  const _LegendItem({required this.color, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 10,
+          height: 10,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        ),
+        const SizedBox(width: 4),
+        Text(label, style: TextStyle(fontSize: 11, color: Colors.grey.shade400)),
+      ],
+    );
+  }
+}
+
+class _PerformanceSummary extends StatelessWidget {
+  final List<RaceResult> results;
+  const _PerformanceSummary({required this.results});
+
+  @override
+  Widget build(BuildContext context) {
+    final wins = results.where((r) => r.rank == 1).length;
+    final places = results.where((r) => r.rank >= 1 && r.rank <= 3).length;
+    final total = results.length;
+    final winRate = total > 0 ? wins / total * 100 : 0.0;
+    final placeRate = total > 0 ? places / total * 100 : 0.0;
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.04),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        children: [
+          _SummaryItem(label: '최근 $total전', value: '$wins승 ${places - wins}복'),
+          Container(width: 1, height: 30, color: Colors.grey.shade700),
+          _SummaryItem(
+            label: '승률',
+            value: '${winRate.toStringAsFixed(1)}%',
+            color: winRate > 0 ? AppTheme.winColor : null,
+          ),
+          Container(width: 1, height: 30, color: Colors.grey.shade700),
+          _SummaryItem(
+            label: 'TOP3',
+            value: '${placeRate.toStringAsFixed(1)}%',
+            color: placeRate >= 30 ? AppTheme.positiveGreen : null,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SummaryItem extends StatelessWidget {
+  final String label;
+  final String value;
+  final Color? color;
+  const _SummaryItem({required this.label, required this.value, this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Text(label, style: TextStyle(fontSize: 10, color: Colors.grey.shade500)),
+        const SizedBox(height: 2),
+        Text(
+          value,
+          style: TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w700,
+            color: color ?? Colors.white,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━ Jockey Win Rate ━━━━━━━━━━━━━━━━━━━━━━━
+
+class _JockeyWinRate extends StatelessWidget {
+  final List<RaceResult> results;
+  final String? currentJockey;
+  const _JockeyWinRate({required this.results, this.currentJockey});
 
   @override
   Widget build(BuildContext context) {
@@ -846,7 +2101,11 @@ class _JockeyStats extends StatelessWidget {
     }
 
     final sorted = jockeys.values.toList()
-      ..sort((a, b) => b.total.compareTo(a.total));
+      ..sort((a, b) {
+        if (a.name == currentJockey) return -1;
+        if (b.name == currentJockey) return 1;
+        return b.total.compareTo(a.total);
+      });
 
     if (sorted.isEmpty) {
       return const Padding(
@@ -859,75 +2118,125 @@ class _JockeyStats extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Column(
         children: sorted.take(5).map((stat) {
-          final winRate =
-              stat.total > 0 ? stat.wins / stat.total * 100 : 0.0;
-          final placeRate =
-              stat.total > 0 ? stat.places / stat.total * 100 : 0.0;
+          final winRate = stat.total > 0 ? stat.wins / stat.total * 100 : 0.0;
+          final placeRate = stat.total > 0 ? stat.places / stat.total * 100 : 0.0;
+          final isCurrent = stat.name == currentJockey;
 
           return Container(
             margin: const EdgeInsets.only(bottom: 6),
-            padding:
-                const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
             decoration: BoxDecoration(
-              color: AppTheme.cardDark,
+              color: isCurrent
+                  ? AppTheme.primaryGreen.withValues(alpha: 0.1)
+                  : AppTheme.cardDark,
               borderRadius: BorderRadius.circular(12),
+              border: isCurrent
+                  ? Border.all(color: AppTheme.primaryGreen.withValues(alpha: 0.3))
+                  : null,
             ),
-            child: Row(
+            child: Column(
               children: [
-                const Icon(Icons.person, size: 20),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    stat.name,
-                    style: const TextStyle(
-                        fontSize: 14, fontWeight: FontWeight.w600),
-                  ),
-                ),
-                Text(
-                  '${stat.total}전 ${stat.wins}승',
-                  style:
-                      TextStyle(fontSize: 12, color: Colors.grey.shade400),
-                ),
-                const SizedBox(width: 8),
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: winRate >= 30
-                        ? AppTheme.positiveGreen.withValues(alpha: 0.2)
-                        : Colors.grey.shade800,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Text(
-                    '승률 ${winRate.toStringAsFixed(0)}%',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
-                      color: winRate >= 30
-                          ? AppTheme.positiveGreen
-                          : Colors.grey.shade300,
+                Row(
+                  children: [
+                    Icon(
+                      isCurrent ? Icons.star_rounded : Icons.person,
+                      size: 20,
+                      color: isCurrent ? AppTheme.primaryGreen : Colors.grey,
                     ),
-                  ),
-                ),
-                const SizedBox(width: 4),
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: placeRate >= 40
-                        ? Colors.cyanAccent.withValues(alpha: 0.15)
-                        : Colors.grey.shade800,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Text(
-                    '입상 ${placeRate.toStringAsFixed(0)}%',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
-                      color: placeRate >= 40
-                          ? Colors.cyanAccent
-                          : Colors.grey.shade300,
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Text(
+                                stat.name,
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w700,
+                                  color: isCurrent ? AppTheme.primaryGreen : null,
+                                ),
+                              ),
+                              if (isCurrent) ...[
+                                const SizedBox(width: 6),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 6, vertical: 1),
+                                  decoration: BoxDecoration(
+                                    color: AppTheme.primaryGreen.withValues(alpha: 0.2),
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: const Text(
+                                    '현재 기수',
+                                    style: TextStyle(
+                                      fontSize: 9,
+                                      fontWeight: FontWeight.w600,
+                                      color: AppTheme.primaryGreen,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            '${stat.total}전 ${stat.wins}승 ${stat.places - stat.wins}복',
+                            style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
+                          ),
+                        ],
+                      ),
                     ),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Text(
+                          '${winRate.toStringAsFixed(0)}%',
+                          style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.w900,
+                            color: winRate >= 30
+                                ? AppTheme.winColor
+                                : winRate > 0
+                                    ? AppTheme.positiveGreen
+                                    : Colors.grey.shade400,
+                          ),
+                        ),
+                        Text(
+                          '승률',
+                          style: TextStyle(fontSize: 10, color: Colors.grey.shade500),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(4),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        flex: (winRate * 10).toInt().clamp(1, 1000),
+                        child: Container(
+                          height: 6,
+                          color: AppTheme.winColor,
+                        ),
+                      ),
+                      Expanded(
+                        flex: ((placeRate - winRate) * 10).toInt().clamp(0, 1000),
+                        child: Container(
+                          height: 6,
+                          color: AppTheme.placeColor,
+                        ),
+                      ),
+                      Expanded(
+                        flex: ((100 - placeRate) * 10).toInt().clamp(1, 1000),
+                        child: Container(
+                          height: 6,
+                          color: Colors.grey.shade700,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ],
