@@ -1539,12 +1539,16 @@ class _AiPredictionChart extends StatelessWidget {
           '$label ',
           style: TextStyle(fontSize: 10, color: Colors.grey.shade500),
         ),
-        Text(
-          value,
-          style: TextStyle(
-            fontSize: 11,
-            fontWeight: FontWeight.w700,
-            color: color,
+        Flexible(
+          child: Text(
+            value,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              color: color,
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
           ),
         ),
       ],
@@ -1641,14 +1645,18 @@ class _HorseCard extends StatelessWidget {
                             Icon(Icons.person, size: 13,
                                 color: Colors.blueAccent.shade100),
                             const SizedBox(width: 3),
-                            Text(
-                              entry.jockeyName.isNotEmpty
-                                  ? entry.jockeyName
-                                  : '-',
-                              style: TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w600,
-                                color: Colors.blueAccent.shade100,
+                            Flexible(
+                              child: Text(
+                                entry.jockeyName.isNotEmpty
+                                    ? entry.jockeyName
+                                    : '-',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.blueAccent.shade100,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
                               ),
                             ),
                             if (entry.trainerName.isNotEmpty) ...[

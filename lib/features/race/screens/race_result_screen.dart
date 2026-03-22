@@ -777,10 +777,14 @@ class _BetCard extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(width: 6),
-                    Text(
-                      bet.desc,
-                      style: TextStyle(
-                          fontSize: 11, color: Colors.grey.shade500),
+                    Flexible(
+                      child: Text(
+                        bet.desc,
+                        style: TextStyle(
+                            fontSize: 11, color: Colors.grey.shade500),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                   ],
                 ),
@@ -789,6 +793,8 @@ class _BetCard extends StatelessWidget {
                   bet.horses,
                   style: const TextStyle(
                       fontSize: 13, fontWeight: FontWeight.w600),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ],
             ),

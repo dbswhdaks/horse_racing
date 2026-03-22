@@ -67,6 +67,8 @@ class RaceCard extends StatelessWidget {
                             fontSize: 13,
                             color: Colors.grey.shade400,
                           ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ],
                     ),

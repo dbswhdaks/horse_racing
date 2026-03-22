@@ -353,50 +353,57 @@ class _StatsOverview extends StatelessWidget {
       child: Column(
         children: [
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
             children: [
-              _StatItem(label: '출주', value: '$total회'),
+              Expanded(child: _StatItem(label: '출주', value: '$total회')),
               _VDivider(),
-              _StatItem(
-                label: '전적',
-                value: '$wins승 $places복 $thirds패',
-                color: wins > 0 ? AppTheme.winColor : null,
+              Expanded(
+                child: _StatItem(
+                  label: '전적',
+                  value: '$wins승 $places복 $thirds패',
+                  color: wins > 0 ? AppTheme.winColor : null,
+                ),
               ),
               _VDivider(),
-              _StatItem(
-                label: '승률',
-                value: '${winRate.toStringAsFixed(1)}%',
-                color: winRate >= 20 ? AppTheme.positiveGreen : null,
+              Expanded(
+                child: _StatItem(
+                  label: '승률',
+                  value: '${winRate.toStringAsFixed(1)}%',
+                  color: winRate >= 20 ? AppTheme.positiveGreen : null,
+                ),
               ),
             ],
           ),
           const SizedBox(height: 12),
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
             children: [
-              _StatItem(
-                label: '입상률',
-                value: '${placeRate.toStringAsFixed(1)}%',
-                color: placeRate >= 30 ? AppTheme.positiveGreen : null,
-              ),
-              _VDivider(),
-              _StatItem(
-                label: 'TOP3율',
-                value: '${top3Rate.toStringAsFixed(1)}%',
-                color: top3Rate >= 30 ? Colors.cyanAccent : null,
-              ),
-              _VDivider(),
-              if (totalPrize > 0)
-                _StatItem(
-                  label: '총상금',
-                  value: _formatPrize(totalPrize),
-                  color: AppTheme.accentGold,
-                )
-              else
-                _StatItem(
-                  label: '최근상금',
-                  value: recentPrize > 0 ? _formatPrize(recentPrize) : '-',
+              Expanded(
+                child: _StatItem(
+                  label: '입상률',
+                  value: '${placeRate.toStringAsFixed(1)}%',
+                  color: placeRate >= 30 ? AppTheme.positiveGreen : null,
                 ),
+              ),
+              _VDivider(),
+              Expanded(
+                child: _StatItem(
+                  label: 'TOP3율',
+                  value: '${top3Rate.toStringAsFixed(1)}%',
+                  color: top3Rate >= 30 ? Colors.cyanAccent : null,
+                ),
+              ),
+              _VDivider(),
+              Expanded(
+                child: totalPrize > 0
+                    ? _StatItem(
+                        label: '총상금',
+                        value: _formatPrize(totalPrize),
+                        color: AppTheme.accentGold,
+                      )
+                    : _StatItem(
+                        label: '최근상금',
+                        value: recentPrize > 0 ? _formatPrize(recentPrize) : '-',
+                      ),
+              ),
             ],
           ),
         ],
@@ -432,6 +439,9 @@ class _StatItem extends StatelessWidget {
             fontWeight: FontWeight.w800,
             color: color,
           ),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          textAlign: TextAlign.center,
         ),
       ],
     );
@@ -2150,12 +2160,16 @@ class _JockeyWinRate extends StatelessWidget {
                         children: [
                           Row(
                             children: [
-                              Text(
-                                stat.name,
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w700,
-                                  color: isCurrent ? AppTheme.primaryGreen : null,
+                              Flexible(
+                                child: Text(
+                                  stat.name,
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w700,
+                                    color: isCurrent ? AppTheme.primaryGreen : null,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
                                 ),
                               ),
                               if (isCurrent) ...[
