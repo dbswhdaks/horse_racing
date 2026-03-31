@@ -1,0 +1,2 @@
+json_key_file("fastlane/play-store-key.json") # Google Play API 키 파일 경로
+package_name("com.horseracingplus.app")

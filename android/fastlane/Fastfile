@@ -1,0 +1,74 @@
+default_platform(:android)
+
+platform :android do
+
+  # ─── 공통 설정 ─────────────────────────────────────────────
+  PROJECT_ROOT = File.expand_path("../../..", __FILE__)  # horse_racing/
+  AAB_PATH     = "#{PROJECT_ROOT}/build/app/outputs/bundle/release/app-release.aab"
+
+  # ─── 1. 빌드만 (로컬 테스트용) ──────────────────────────────
+  desc "Flutter AAB 빌드"
+  lane :build do
+    Dir.chdir(PROJECT_ROOT) do
+      sh("flutter build appbundle --release")
+    end
+    UI.success("빌드 완료: #{AAB_PATH}")
+  end
+
+  # ─── 2. 내부 테스트 트랙 배포 ────────────────────────────────
+  desc "내부 테스트 트랙에 배포"
+  lane :internal do
+    build
+
+    upload_to_play_store(
+      track:              "internal",
+      aab:                AAB_PATH,
+      release_status:     "draft",
+      skip_upload_apk:    true,
+      skip_upload_images: true,
+      skip_upload_screenshots: true,
+    )
+
+    UI.success("내부 테스트 트랙 배포 완료!")
+  end
+
+  # ─── 3. 베타(오픈 테스트) 배포 ───────────────────────────────
+  desc "베타(오픈 테스트) 트랙에 배포"
+  lane :beta do
+    build
+
+    upload_to_play_store(
+      track:              "beta",
+      aab:                AAB_PATH,
+      skip_upload_apk:    true,
+      skip_upload_images: true,
+      skip_upload_screenshots: true,
+    )
+
+    UI.success("베타 트랙 배포 완료!")
+  end
+
+  # ─── 4. 프로덕션 배포 ────────────────────────────────────────
+  desc "프로덕션 배포"
+  lane :production do
+    build
+
+    upload_to_play_store(
+      track:              "production",
+      aab:                AAB_PATH,
+      skip_upload_apk:    true,
+      skip_upload_images: true,
+      skip_upload_screenshots: true,
+    )
+
+    UI.success("프로덕션 배포 완료!")
+  end
+
+  # ─── 5. 버전 정보 확인 ───────────────────────────────────────
+  desc "현재 버전 코드 확인 (Play Store)"
+  lane :check_version do
+    version_code = google_play_track_version_codes(track: "internal")
+    UI.message("현재 내부 트랙 버전 코드: #{version_code}")
+  end
+
+end
