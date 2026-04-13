@@ -3,13 +3,16 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/constants/api_constants.dart';
+import '../../../core/services/kra_video_service.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/shimmer_loading.dart';
 import '../../../models/odds.dart';
 import '../providers/race_providers.dart';
+import '../widgets/race_auto_refresh_hook.dart';
 import '../widgets/entry_card.dart';
 import '../widgets/odds_panel.dart';
 import '../widgets/prediction_summary.dart';
+import '../widgets/race_video_panel.dart';
 
 class RaceDetailScreen extends ConsumerWidget {
   final String meet;
@@ -34,6 +37,9 @@ class RaceDetailScreen extends ConsumerWidget {
     final predAsync = ref.watch(
       predictionProvider((meet: meet, date: date, raceNo: raceNo)),
     );
+    final videoAsync = ref.watch(
+      raceVideoLinksProvider((meet: meet, date: date, raceNo: raceNo)),
+    );
 
     final meetName = ApiConstants.meetNames[meet] ?? meet;
 
@@ -52,6 +58,33 @@ class RaceDetailScreen extends ConsumerWidget {
                       context.push('/prediction/$meet/$date/$raceNo'),
                 ),
               ],
+            ),
+
+            SliverToBoxAdapter(
+              child: RaceAutoRefreshHook(
+                meet: meet,
+                date: date,
+                raceNo: raceNo,
+              ),
+            ),
+
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
+                child: videoAsync.when(
+                  loading: () => const ShimmerLoading(height: 78),
+                  error: (_, __) => RaceVideoPanel(
+                    links: RaceVideoLinks(
+                      liveUrl:
+                          '${ApiConstants.todayRaceBaseUrl}${ApiConstants.todayRaceScorePath}',
+                      paradeUrl: ApiConstants.todayRaceParadeVideoUrl,
+                      hasVideoSection: false,
+                      isRaceVideoFromApi: false,
+                    ),
+                  ),
+                  data: (links) => RaceVideoPanel(links: links),
+                ),
+              ),
             ),
 
             // AI Prediction Summary
@@ -156,8 +189,11 @@ class RaceDetailScreen extends ConsumerWidget {
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.error_outline,
-                          size: 48, color: Colors.grey.shade600),
+                      Icon(
+                        Icons.error_outline,
+                        size: 48,
+                        color: Colors.grey.shade600,
+                      ),
                       const SizedBox(height: 12),
                       const Text('출마표를 불러올 수 없습니다'),
                     ],
@@ -165,23 +201,20 @@ class RaceDetailScreen extends ConsumerWidget {
                 ),
               ),
               data: (entries) => SliverList(
-                delegate: SliverChildBuilderDelegate(
-                  (ctx, i) {
-                    final entry = entries[i];
-                    final winOdds = _findWinOdds(
-                      oddsAsync.valueOrNull ?? [],
-                      entry.horseNo,
-                    );
-                    return EntryCard(
-                      entry: entry,
-                      winOdds: winOdds,
-                      onTap: () => context.push(
-                        '/horse/${Uri.encodeComponent(entry.horseName)}?meet=$meet',
-                      ),
-                    );
-                  },
-                  childCount: entries.length,
-                ),
+                delegate: SliverChildBuilderDelegate((ctx, i) {
+                  final entry = entries[i];
+                  final winOdds = _findWinOdds(
+                    oddsAsync.valueOrNull ?? [],
+                    entry.horseNo,
+                  );
+                  return EntryCard(
+                    entry: entry,
+                    winOdds: winOdds,
+                    onTap: () => context.push(
+                      '/horse/${Uri.encodeComponent(entry.horseName)}?meet=$meet',
+                    ),
+                  );
+                }, childCount: entries.length),
               ),
             ),
 
@@ -221,15 +254,16 @@ class _MlOfflineBanner extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Icon(Icons.auto_awesome, color: Colors.purpleAccent.shade100, size: 20),
+          Icon(
+            Icons.auto_awesome,
+            color: Colors.purpleAccent.shade100,
+            size: 20,
+          ),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
               '출전표 API 활용 신청 후 AI 예측이 표시됩니다',
-              style: TextStyle(
-                fontSize: 13,
-                color: Colors.purple.shade200,
-              ),
+              style: TextStyle(fontSize: 13, color: Colors.purple.shade200),
             ),
           ),
         ],

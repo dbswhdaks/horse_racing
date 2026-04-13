@@ -33,6 +33,13 @@ class ApiConstants {
 
   static const String mlBackendUrl = 'http://localhost:8000';
 
+  static const String todayRaceBaseUrl = 'https://todayrace.kra.co.kr';
+  static const String todayRaceScorePath = '/score/race/selectRaceList.do';
+  static const String todayRaceParadeVideoUrl =
+      'https://www.youtube.com/results?search_query=한국마사회+경주로+입장';
+  static const String youtubeApiBaseUrl = 'https://www.googleapis.com';
+  static const String youtubeChannelHandle = '@KRBCRACE';
+
   static const Map<String, String> meetCodes = {
     '서울': '1',
     '제주': '2',

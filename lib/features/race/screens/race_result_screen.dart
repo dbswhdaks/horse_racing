@@ -2,6 +2,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/constants/api_constants.dart';
 import '../../../core/theme/app_theme.dart';
@@ -48,21 +49,25 @@ class RaceResultScreen extends ConsumerWidget {
               ],
             ),
             resultsAsync.when(
-              loading: () => SliverFillRemaining(
-                child: ShimmerCardList(cardHeight: 100),
-              ),
+              loading: () =>
+                  SliverFillRemaining(child: ShimmerCardList(cardHeight: 100)),
               error: (err, _) => SliverFillRemaining(
                 child: Center(
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.timer_outlined,
-                          size: 56, color: Colors.grey.shade600),
+                      Icon(
+                        Icons.timer_outlined,
+                        size: 56,
+                        color: Colors.grey.shade600,
+                      ),
                       const SizedBox(height: 14),
                       const Text(
                         '경주결과를 불러올 수 없습니다',
                         style: TextStyle(
-                            fontSize: 16, fontWeight: FontWeight.w600),
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                       const SizedBox(height: 6),
                       Text(
@@ -76,8 +81,11 @@ class RaceResultScreen extends ConsumerWidget {
                       const SizedBox(height: 20),
                       FilledButton.icon(
                         onPressed: () => ref.invalidate(
-                          raceResultProvider(
-                              (meet: meet, date: date, raceNo: raceNo)),
+                          raceResultProvider((
+                            meet: meet,
+                            date: date,
+                            raceNo: raceNo,
+                          )),
                         ),
                         icon: const Icon(Icons.refresh, size: 18),
                         label: const Text('다시 시도'),
@@ -101,8 +109,11 @@ class RaceResultScreen extends ConsumerWidget {
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(Icons.hourglass_empty,
-                              size: 48, color: Colors.grey.shade600),
+                          Icon(
+                            Icons.hourglass_empty,
+                            size: 48,
+                            color: Colors.grey.shade600,
+                          ),
                           const SizedBox(height: 12),
                           const Text('아직 결과가 없습니다'),
                           const SizedBox(height: 4),
@@ -123,8 +134,7 @@ class RaceResultScreen extends ConsumerWidget {
                   ..sort((a, b) => a.rank.compareTo(b.rank));
                 final excluded = results.where((r) => r.rank <= 0).toList();
                 final sorted = [...ranked, ...excluded];
-                final predictions =
-                    predAsync.valueOrNull?.predictions ?? [];
+                final predictions = predAsync.valueOrNull?.predictions ?? [];
 
                 final podium = ranked.where((r) => r.rank <= 3).toList();
 
@@ -132,7 +142,10 @@ class RaceResultScreen extends ConsumerWidget {
                   delegate: SliverChildListDelegate([
                     // 포디엄
                     if (podium.isNotEmpty)
-                      _PodiumSection(results: podium),
+                      _PodiumSection(
+                        results: podium,
+                        onVideoTap: () => _openRaceVideo(context, ref),
+                      ),
 
                     // AI 예측 비교
                     if (predictions.isNotEmpty)
@@ -155,15 +168,20 @@ class RaceResultScreen extends ConsumerWidget {
                           const Text(
                             '전체 순위',
                             style: TextStyle(
-                                fontSize: 17, fontWeight: FontWeight.w800),
+                              fontSize: 17,
+                              fontWeight: FontWeight.w800,
+                            ),
                           ),
                           const SizedBox(width: 8),
                           Container(
                             padding: const EdgeInsets.symmetric(
-                                horizontal: 8, vertical: 2),
+                              horizontal: 8,
+                              vertical: 2,
+                            ),
                             decoration: BoxDecoration(
-                              color:
-                                  AppTheme.primaryGreen.withValues(alpha: 0.2),
+                              color: AppTheme.primaryGreen.withValues(
+                                alpha: 0.2,
+                              ),
                               borderRadius: BorderRadius.circular(10),
                             ),
                             child: Text(
@@ -206,6 +224,20 @@ class RaceResultScreen extends ConsumerWidget {
     }
     return null;
   }
+
+  Future<void> _openRaceVideo(BuildContext context, WidgetRef ref) async {
+    final links = await ref.read(
+      raceVideoLinksProvider((meet: meet, date: date, raceNo: raceNo)).future,
+    );
+    final uri = Uri.parse(links.liveUrl);
+
+    final success = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!success && context.mounted) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('경주영상을 열 수 없습니다.')));
+    }
+  }
 }
 
 // ═══════════════════════════════════════════════════
@@ -214,7 +246,9 @@ class RaceResultScreen extends ConsumerWidget {
 
 class _PodiumSection extends StatelessWidget {
   final List<RaceResult> results;
-  const _PodiumSection({required this.results});
+  final VoidCallback onVideoTap;
+
+  const _PodiumSection({required this.results, required this.onVideoTap});
 
   @override
   Widget build(BuildContext context) {
@@ -233,9 +267,7 @@ class _PodiumSection extends StatelessWidget {
           end: Alignment.bottomCenter,
         ),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: AppTheme.winColor.withValues(alpha: 0.2),
-        ),
+        border: Border.all(color: AppTheme.winColor.withValues(alpha: 0.2)),
       ),
       child: Column(
         children: [
@@ -247,6 +279,23 @@ class _PodiumSection extends StatelessWidget {
               const Text(
                 '입상 마필',
                 style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+              ),
+              const Spacer(),
+              SizedBox(
+                height: 32,
+                child: FilledButton.icon(
+                  onPressed: onVideoTap,
+                  icon: const Icon(Icons.play_circle_fill_rounded, size: 16),
+                  label: const Text(
+                    '경주영상',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+                  ),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFFEF5350),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                  ),
+                ),
               ),
             ],
           ),
@@ -268,7 +317,9 @@ class _PodiumSection extends StatelessWidget {
     for (int i = 0; i < count; i++) {
       if (i > 0) widgets.add(const SizedBox(width: 6));
       widgets.add(
-        Expanded(child: _PodiumCard(result: results[i], rank: i + 1)),
+        Expanded(
+          child: _PodiumCard(result: results[i], rank: i + 1),
+        ),
       );
     }
     return widgets;
@@ -279,10 +330,7 @@ class _PodiumCard extends StatelessWidget {
   final RaceResult result;
   final int rank;
 
-  const _PodiumCard({
-    required this.result,
-    required this.rank,
-  });
+  const _PodiumCard({required this.result, required this.rank});
 
   @override
   Widget build(BuildContext context) {
@@ -290,7 +338,8 @@ class _PodiumCard extends StatelessWidget {
     final color = colors[(rank - 1).clamp(0, 2)];
     final rankLabels = ['1착', '2착', '3착'];
 
-    final hasValidTime = result.raceTime.isNotEmpty &&
+    final hasValidTime =
+        result.raceTime.isNotEmpty &&
         result.raceTime != '0.0' &&
         result.raceTime != '0';
 
@@ -338,10 +387,7 @@ class _PodiumCard extends StatelessWidget {
           const SizedBox(height: 4),
           Text(
             result.horseName,
-            style: const TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w800,
-            ),
+            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             textAlign: TextAlign.center,
@@ -350,10 +396,7 @@ class _PodiumCard extends StatelessWidget {
             const SizedBox(height: 2),
             Text(
               result.jockeyName,
-              style: TextStyle(
-                fontSize: 10,
-                color: Colors.grey.shade400,
-              ),
+              style: TextStyle(fontSize: 10, color: Colors.grey.shade400),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
@@ -412,8 +455,10 @@ class _AiComparisonSection extends StatelessWidget {
     if (sorted.isEmpty || results.isEmpty) return const SizedBox.shrink();
 
     final top3pred = sorted.take(3).toList();
-    final actualTop3 =
-        results.where((r) => r.rank >= 1 && r.rank <= 3).take(3).toList();
+    final actualTop3 = results
+        .where((r) => r.rank >= 1 && r.rank <= 3)
+        .take(3)
+        .toList();
 
     int hits = 0;
     for (final pred in top3pred) {
@@ -424,8 +469,8 @@ class _AiComparisonSection extends StatelessWidget {
     final accuracyColor = accuracy >= 66
         ? AppTheme.positiveGreen
         : accuracy >= 33
-            ? AppTheme.accentGold
-            : AppTheme.negativeRed;
+        ? AppTheme.accentGold
+        : AppTheme.negativeRed;
 
     return Container(
       margin: const EdgeInsets.fromLTRB(12, 8, 12, 4),
@@ -440,9 +485,7 @@ class _AiComparisonSection extends StatelessWidget {
           end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: Colors.deepPurple.withValues(alpha: 0.3),
-        ),
+        border: Border.all(color: Colors.deepPurple.withValues(alpha: 0.3)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -450,8 +493,11 @@ class _AiComparisonSection extends StatelessWidget {
           // 헤더
           Row(
             children: [
-              Icon(Icons.auto_awesome,
-                  size: 20, color: Colors.purpleAccent.shade100),
+              Icon(
+                Icons.auto_awesome,
+                size: 20,
+                color: Colors.purpleAccent.shade100,
+              ),
               const SizedBox(width: 8),
               const Text(
                 'AI 예측 vs 실제 결과',
@@ -459,13 +505,16 @@ class _AiComparisonSection extends StatelessWidget {
               ),
               const Spacer(),
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 4,
+                ),
                 decoration: BoxDecoration(
                   color: accuracyColor.withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(10),
-                  border:
-                      Border.all(color: accuracyColor.withValues(alpha: 0.3)),
+                  border: Border.all(
+                    color: accuracyColor.withValues(alpha: 0.3),
+                  ),
                 ),
                 child: Text(
                   '적중률 ${accuracy.toStringAsFixed(0)}%',
@@ -511,7 +560,11 @@ class _AiComparisonSection extends StatelessWidget {
           ),
           const SizedBox(height: 8),
 
-          for (int i = 0; i < min(3, max(top3pred.length, actualTop3.length)); i++)
+          for (
+            int i = 0;
+            i < min(3, max(top3pred.length, actualTop3.length));
+            i++
+          )
             _ComparisonRow(
               rank: i + 1,
               predicted: i < top3pred.length ? top3pred[i] : null,
@@ -528,17 +581,19 @@ class _ComparisonRow extends StatelessWidget {
   final Prediction? predicted;
   final RaceResult? actual;
 
-  const _ComparisonRow({
-    required this.rank,
-    this.predicted,
-    this.actual,
-  });
+  const _ComparisonRow({required this.rank, this.predicted, this.actual});
 
   @override
   Widget build(BuildContext context) {
     final isMatch =
-        predicted != null && actual != null && predicted!.horseNo == actual!.horseNo;
-    final rankColors = [AppTheme.winColor, AppTheme.placeColor, AppTheme.showColor];
+        predicted != null &&
+        actual != null &&
+        predicted!.horseNo == actual!.horseNo;
+    final rankColors = [
+      AppTheme.winColor,
+      AppTheme.placeColor,
+      AppTheme.showColor,
+    ];
     final color = rankColors[(rank - 1).clamp(0, 2)];
 
     return Container(
@@ -586,7 +641,9 @@ class _ComparisonRow extends StatelessWidget {
                         child: Text(
                           predicted!.horseName,
                           style: const TextStyle(
-                              fontSize: 12, fontWeight: FontWeight.w600),
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -601,9 +658,11 @@ class _ComparisonRow extends StatelessWidget {
                       ),
                     ],
                   )
-                : Text('-',
+                : Text(
+                    '-',
                     style: TextStyle(color: Colors.grey.shade600),
-                    textAlign: TextAlign.center),
+                    textAlign: TextAlign.center,
+                  ),
           ),
           // 화살표
           Padding(
@@ -625,7 +684,9 @@ class _ComparisonRow extends StatelessWidget {
                         child: Text(
                           actual!.horseName,
                           style: const TextStyle(
-                              fontSize: 12, fontWeight: FontWeight.w600),
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -641,9 +702,11 @@ class _ComparisonRow extends StatelessWidget {
                         ),
                     ],
                   )
-                : Text('-',
+                : Text(
+                    '-',
                     style: TextStyle(color: Colors.grey.shade600),
-                    textAlign: TextAlign.center),
+                    textAlign: TextAlign.center,
+                  ),
           ),
         ],
       ),
@@ -684,28 +747,62 @@ class _BettingResultsSection extends StatelessWidget {
         v >= 100 ? '${v.toStringAsFixed(0)}배' : '${v.toStringAsFixed(1)}배';
 
     final bets = [
-      _Bet('단승식', '1등 맞히기', Icons.looks_one_rounded,
-          AppTheme.winColor, '${r1.horseNo}번 ${r1.horseName}', fmt(w1)),
-      _Bet('연승식', '3등 안에 들기', Icons.format_list_numbered_rounded,
-          AppTheme.placeColor,
-          '${r1.horseNo}번 ${fmt(p1)} / ${r2.horseNo}번 ${fmt(p2)} / ${r3.horseNo}번 ${fmt(p3)}',
-          ''),
-      _Bet('복승식', '순서무관 1·2등', Icons.swap_horiz_rounded,
-          const Color(0xFF42A5F5),
-          '${r1.horseNo}번 + ${r2.horseNo}번', fmt(quinella)),
-      _Bet('쌍승식', '순서대로 1→2등', Icons.arrow_forward_rounded,
-          const Color(0xFFEF5350),
-          '${r1.horseNo}번 → ${r2.horseNo}번', fmt(exacta)),
-      _Bet('복연승식', '3등 안에 두 마리', Icons.people_rounded,
-          const Color(0xFF66BB6A),
-          '${r1.horseNo}·${r2.horseNo}, ${r1.horseNo}·${r3.horseNo}, ${r2.horseNo}·${r3.horseNo}',
-          fmt(quinellaPlace)),
-      _Bet('삼복승식', '순서무관 1·2·3등', Icons.groups_rounded,
-          const Color(0xFFAB47BC),
-          '${r1.horseNo} + ${r2.horseNo} + ${r3.horseNo}번', fmt(trifecta)),
-      _Bet('삼쌍승식', '순서대로 1→2→3등', Icons.military_tech_rounded,
-          const Color(0xFFFF7043),
-          '${r1.horseNo} → ${r2.horseNo} → ${r3.horseNo}번', fmt(trio)),
+      _Bet(
+        '단승식',
+        '1등 맞히기',
+        Icons.looks_one_rounded,
+        AppTheme.winColor,
+        '${r1.horseNo}번 ${r1.horseName}',
+        fmt(w1),
+      ),
+      _Bet(
+        '연승식',
+        '3등 안에 들기',
+        Icons.format_list_numbered_rounded,
+        AppTheme.placeColor,
+        '${r1.horseNo}번 ${fmt(p1)} / ${r2.horseNo}번 ${fmt(p2)} / ${r3.horseNo}번 ${fmt(p3)}',
+        '',
+      ),
+      _Bet(
+        '복승식',
+        '순서무관 1·2등',
+        Icons.swap_horiz_rounded,
+        const Color(0xFF42A5F5),
+        '${r1.horseNo}번 + ${r2.horseNo}번',
+        fmt(quinella),
+      ),
+      _Bet(
+        '쌍승식',
+        '순서대로 1→2등',
+        Icons.arrow_forward_rounded,
+        const Color(0xFFEF5350),
+        '${r1.horseNo}번 → ${r2.horseNo}번',
+        fmt(exacta),
+      ),
+      _Bet(
+        '복연승식',
+        '3등 안에 두 마리',
+        Icons.people_rounded,
+        const Color(0xFF66BB6A),
+        '${r1.horseNo}·${r2.horseNo}, ${r1.horseNo}·${r3.horseNo}, ${r2.horseNo}·${r3.horseNo}',
+        fmt(quinellaPlace),
+      ),
+      _Bet(
+        '삼복승식',
+        '순서무관 1·2·3등',
+        Icons.groups_rounded,
+        const Color(0xFFAB47BC),
+        '${r1.horseNo} + ${r2.horseNo} + ${r3.horseNo}번',
+        fmt(trifecta),
+      ),
+      _Bet(
+        '삼쌍승식',
+        '순서대로 1→2→3등',
+        Icons.military_tech_rounded,
+        const Color(0xFFFF7043),
+        '${r1.horseNo} → ${r2.horseNo} → ${r3.horseNo}번',
+        fmt(trio),
+      ),
     ];
 
     return Padding(
@@ -733,7 +830,13 @@ class _Bet {
   final Color color;
   final String horses, odds;
   const _Bet(
-      this.name, this.desc, this.icon, this.color, this.horses, this.odds);
+    this.name,
+    this.desc,
+    this.icon,
+    this.color,
+    this.horses,
+    this.odds,
+  );
 }
 
 class _BetCard extends StatelessWidget {
@@ -781,7 +884,9 @@ class _BetCard extends StatelessWidget {
                       child: Text(
                         bet.desc,
                         style: TextStyle(
-                            fontSize: 11, color: Colors.grey.shade500),
+                          fontSize: 11,
+                          color: Colors.grey.shade500,
+                        ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -792,7 +897,9 @@ class _BetCard extends StatelessWidget {
                 Text(
                   bet.horses,
                   style: const TextStyle(
-                      fontSize: 13, fontWeight: FontWeight.w600),
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -801,8 +908,7 @@ class _BetCard extends StatelessWidget {
           ),
           if (bet.odds.isNotEmpty)
             Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
               decoration: BoxDecoration(
                 color: AppTheme.accentGold.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(8),
@@ -833,7 +939,8 @@ class _RaceTimeAnalysis extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final hasTimeData = results.any(
-        (r) => r.s1f.isNotEmpty || r.g3f.isNotEmpty || r.passOrder.isNotEmpty);
+      (r) => r.s1f.isNotEmpty || r.g3f.isNotEmpty || r.passOrder.isNotEmpty,
+    );
     if (!hasTimeData) return const SizedBox.shrink();
 
     return Container(
@@ -842,17 +949,18 @@ class _RaceTimeAnalysis extends StatelessWidget {
       decoration: BoxDecoration(
         color: AppTheme.cardDark,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: Colors.blueAccent.withValues(alpha: 0.2),
-        ),
+        border: Border.all(color: Colors.blueAccent.withValues(alpha: 0.2)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Icon(Icons.timer_rounded,
-                  size: 18, color: Colors.blueAccent.shade100),
+              Icon(
+                Icons.timer_rounded,
+                size: 18,
+                color: Colors.blueAccent.shade100,
+              ),
               const SizedBox(width: 8),
               const Text(
                 '레이스 타임 분석',
@@ -872,38 +980,56 @@ class _RaceTimeAnalysis extends StatelessWidget {
             child: Row(
               children: [
                 const SizedBox(
-                    width: 32,
-                    child: Text('순위',
-                        style: TextStyle(fontSize: 10, color: Colors.grey),
-                        textAlign: TextAlign.center)),
+                  width: 32,
+                  child: Text(
+                    '순위',
+                    style: TextStyle(fontSize: 10, color: Colors.grey),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
                 const SizedBox(width: 4),
                 const Expanded(
-                    flex: 3,
-                    child: Text('마명',
-                        style: TextStyle(fontSize: 10, color: Colors.grey))),
+                  flex: 3,
+                  child: Text(
+                    '마명',
+                    style: TextStyle(fontSize: 10, color: Colors.grey),
+                  ),
+                ),
                 const Expanded(
-                    flex: 2,
-                    child: Text('기록',
-                        style: TextStyle(fontSize: 10, color: Colors.grey),
-                        textAlign: TextAlign.center)),
+                  flex: 2,
+                  child: Text(
+                    '기록',
+                    style: TextStyle(fontSize: 10, color: Colors.grey),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
                 if (results.any((r) => r.s1f.isNotEmpty))
                   const Expanded(
-                      flex: 2,
-                      child: Text('S1F',
-                          style: TextStyle(fontSize: 10, color: Colors.grey),
-                          textAlign: TextAlign.center)),
+                    flex: 2,
+                    child: Text(
+                      'S1F',
+                      style: TextStyle(fontSize: 10, color: Colors.grey),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
                 if (results.any((r) => r.g3f.isNotEmpty))
                   const Expanded(
-                      flex: 2,
-                      child: Text('G3F',
-                          style: TextStyle(fontSize: 10, color: Colors.grey),
-                          textAlign: TextAlign.center)),
+                    flex: 2,
+                    child: Text(
+                      'G3F',
+                      style: TextStyle(fontSize: 10, color: Colors.grey),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
                 if (results.any((r) => r.passOrder.isNotEmpty))
                   const Expanded(
-                      flex: 3,
-                      child: Text('통과순위',
-                          style: TextStyle(fontSize: 10, color: Colors.grey),
-                          textAlign: TextAlign.center)),
+                    flex: 3,
+                    child: Text(
+                      '통과순위',
+                      style: TextStyle(fontSize: 10, color: Colors.grey),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
               ],
             ),
           ),
@@ -914,10 +1040,10 @@ class _RaceTimeAnalysis extends StatelessWidget {
             final rankColor = r.rank == 1
                 ? AppTheme.winColor
                 : r.rank == 2
-                    ? AppTheme.placeColor
-                    : r.rank == 3
-                        ? AppTheme.showColor
-                        : Colors.grey.shade500;
+                ? AppTheme.placeColor
+                : r.rank == 3
+                ? AppTheme.showColor
+                : Colors.grey.shade500;
 
             return Padding(
               padding: const EdgeInsets.symmetric(vertical: 3),
@@ -946,7 +1072,9 @@ class _RaceTimeAnalysis extends StatelessWidget {
                           child: Text(
                             r.horseName,
                             style: const TextStyle(
-                                fontSize: 12, fontWeight: FontWeight.w600),
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                            ),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                           ),
@@ -962,7 +1090,9 @@ class _RaceTimeAnalysis extends StatelessWidget {
                       style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w700,
-                        color: r.rank <= 3 ? Colors.white : Colors.grey.shade400,
+                        color: r.rank <= 3
+                            ? Colors.white
+                            : Colors.grey.shade400,
                       ),
                     ),
                   ),
@@ -973,7 +1103,9 @@ class _RaceTimeAnalysis extends StatelessWidget {
                         r.s1f.isNotEmpty ? r.s1f : '-',
                         textAlign: TextAlign.center,
                         style: TextStyle(
-                            fontSize: 12, color: Colors.grey.shade400),
+                          fontSize: 12,
+                          color: Colors.grey.shade400,
+                        ),
                       ),
                     ),
                   if (results.any((r) => r.g3f.isNotEmpty))
@@ -983,7 +1115,9 @@ class _RaceTimeAnalysis extends StatelessWidget {
                         r.g3f.isNotEmpty ? r.g3f : '-',
                         textAlign: TextAlign.center,
                         style: TextStyle(
-                            fontSize: 12, color: Colors.grey.shade400),
+                          fontSize: 12,
+                          color: Colors.grey.shade400,
+                        ),
                       ),
                     ),
                   if (results.any((r) => r.passOrder.isNotEmpty))
@@ -993,7 +1127,9 @@ class _RaceTimeAnalysis extends StatelessWidget {
                         r.passOrder.isNotEmpty ? r.passOrder : '-',
                         textAlign: TextAlign.center,
                         style: TextStyle(
-                            fontSize: 11, color: Colors.grey.shade400),
+                          fontSize: 11,
+                          color: Colors.grey.shade400,
+                        ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -1028,10 +1164,10 @@ class _DetailedResultCard extends StatelessWidget {
     final rankColor = result.rank == 1
         ? AppTheme.winColor
         : result.rank == 2
-            ? AppTheme.placeColor
-            : result.rank == 3
-                ? AppTheme.showColor
-                : Colors.grey.shade500;
+        ? AppTheme.placeColor
+        : result.rank == 3
+        ? AppTheme.showColor
+        : Colors.grey.shade500;
 
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
@@ -1064,7 +1200,8 @@ class _DetailedResultCard extends StatelessWidget {
                       ),
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(
-                          color: rankColor.withValues(alpha: 0.3)),
+                        color: rankColor.withValues(alpha: 0.3),
+                      ),
                     ),
                     child: Center(
                       child: result.rank > 0
@@ -1136,7 +1273,9 @@ class _DetailedResultCard extends StatelessWidget {
                         Text(
                           result.rankDiff,
                           style: TextStyle(
-                              fontSize: 11, color: Colors.grey.shade500),
+                            fontSize: 11,
+                            color: Colors.grey.shade500,
+                          ),
                         ),
                     ],
                   ),
@@ -1154,21 +1293,31 @@ class _DetailedResultCard extends StatelessWidget {
                   children: [
                     if (result.weight > 0)
                       _StatChip(
-                          '부담중량', '${result.weight.toStringAsFixed(0)}kg'),
+                        '부담중량',
+                        '${result.weight.toStringAsFixed(0)}kg',
+                      ),
                     if (result.horseWeight > 0)
                       _StatChip(
-                          '마체중', '${result.horseWeight.toStringAsFixed(0)}kg'),
+                        '마체중',
+                        '${result.horseWeight.toStringAsFixed(0)}kg',
+                      ),
                     if (result.winOdds > 0)
-                      _StatChip('단승', '${result.winOdds.toStringAsFixed(1)}배',
-                          color: AppTheme.accentGold),
+                      _StatChip(
+                        '단승',
+                        '${result.winOdds.toStringAsFixed(1)}배',
+                        color: AppTheme.accentGold,
+                      ),
                     if (result.placeOdds > 0)
                       _StatChip(
-                          '연승', '${result.placeOdds.toStringAsFixed(1)}배'),
-                    if (prediction != null &&
-                        prediction!.winProbability > 0)
+                        '연승',
+                        '${result.placeOdds.toStringAsFixed(1)}배',
+                      ),
+                    if (prediction != null && prediction!.winProbability > 0)
                       Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 3),
+                          horizontal: 8,
+                          vertical: 3,
+                        ),
                         decoration: BoxDecoration(
                           color: Colors.deepPurple.withValues(alpha: 0.12),
                           borderRadius: BorderRadius.circular(8),
@@ -1176,9 +1325,11 @@ class _DetailedResultCard extends StatelessWidget {
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Icon(Icons.auto_awesome,
-                                size: 11,
-                                color: Colors.purpleAccent.shade100),
+                            Icon(
+                              Icons.auto_awesome,
+                              size: 11,
+                              color: Colors.purpleAccent.shade100,
+                            ),
                             const SizedBox(width: 3),
                             Text(
                               '${prediction!.winProbability.toStringAsFixed(1)}%',
@@ -1201,8 +1352,10 @@ class _DetailedResultCard extends StatelessWidget {
                 const SizedBox(height: 8),
                 Container(
                   width: double.infinity,
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 6,
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.grey.shade800.withValues(alpha: 0.25),
                     borderRadius: BorderRadius.circular(8),
@@ -1231,8 +1384,7 @@ class _DetailedResultCard extends StatelessWidget {
   static bool _hasValidTime(String t) =>
       t.isNotEmpty && t != '0.0' && t != '0' && t != '0:00.0';
 
-  static bool _hasValidStr(String s) =>
-      s.isNotEmpty && s != '0' && s != '0.0';
+  static bool _hasValidStr(String s) => s.isNotEmpty && s != '0' && s != '0.0';
 
   bool _hasAnyStats() =>
       result.weight > 0 ||
@@ -1288,8 +1440,7 @@ class _InlineLabel extends StatelessWidget {
           ),
           TextSpan(
             text: value,
-            style: const TextStyle(
-                fontSize: 12, fontWeight: FontWeight.w600),
+            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
           ),
         ],
       ),

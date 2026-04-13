@@ -20,16 +20,21 @@ class KraApiService {
     if (rcMonth != null) params['rc_month'] = rcMonth;
 
     final response = await _get(ApiConstants.racePlanPath, params);
-    if (response == null) return [];
+    if (response == null) {
+      throw Exception('경주일정 서버 연결에 실패했습니다. 잠시 후 다시 시도해주세요.');
+    }
 
     var races = _parseList(response, (json) => Race.fromJson(json));
 
-    if (races.isEmpty && rcDate != null && rcDate.length == 8 && rcMonth == null) {
+    if (races.isEmpty &&
+        rcDate != null &&
+        rcDate.length == 8 &&
+        rcMonth == null) {
       final monthParam = rcDate.substring(0, 6);
-      final monthResponse = await _get(
-        ApiConstants.racePlanPath,
-        {'meet': meet, 'rc_month': monthParam},
-      );
+      final monthResponse = await _get(ApiConstants.racePlanPath, {
+        'meet': meet,
+        'rc_month': monthParam,
+      });
       if (monthResponse != null) {
         races = _parseList(monthResponse, (json) => Race.fromJson(json));
         races = races.where((r) => r.raceDate == rcDate).toList();
@@ -64,9 +69,11 @@ class KraApiService {
       final first = rawItems.first;
       if (first is Map) {
         debugPrint('[KRA] 출전표 필드 목록: ${first.keys.toList()}');
-        debugPrint('[KRA] chulNo=${first['chulNo']}, hrNo=${first['hrNo']}, '
-            'hrNm=${first['hrNm']}, jkNm=${first['jkNm']}, '
-            'jockyNm=${first['jockyNm']}, trNm=${first['trNm']}');
+        debugPrint(
+          '[KRA] chulNo=${first['chulNo']}, hrNo=${first['hrNo']}, '
+          'hrNm=${first['hrNm']}, jkNm=${first['jkNm']}, '
+          'jockyNm=${first['jockyNm']}, trNm=${first['trNm']}',
+        );
       }
     } else if (rawItems is Map) {
       debugPrint('[KRA] 출전표 필드 목록: ${rawItems.keys.toList()}');
@@ -108,8 +115,10 @@ class KraApiService {
       final header = body['response']?['header'];
       final resultCode = header?['resultCode']?.toString();
       final totalCount = body['response']?['body']?['totalCount'];
-      debugPrint('[KRA] getRaceResult resultCode=$resultCode, '
-          'totalCount=$totalCount');
+      debugPrint(
+        '[KRA] getRaceResult resultCode=$resultCode, '
+        'totalCount=$totalCount',
+      );
     }
 
     var results = _parseList(response, (json) => RaceResult.fromJson(json));
@@ -143,21 +152,37 @@ class KraApiService {
     return _parseList(response, (json) => Odds.fromJson(json));
   }
 
-  Future<Response?> _get(
-    String path,
-    Map<String, dynamic> params,
-  ) async {
-    try {
-      final response = await _dio.get(path, queryParameters: params);
-      debugPrint('[KRA] $path → ${response.statusCode}');
-      return response;
-    } on DioException catch (e) {
-      debugPrint('[KRA] $path 요청 실패: ${e.response?.statusCode} ${e.message}');
-      return null;
-    } catch (e) {
-      debugPrint('[KRA] $path 오류: $e');
-      return null;
+  Future<Response?> _get(String path, Map<String, dynamic> params) async {
+    for (var attempt = 1; attempt <= 2; attempt++) {
+      try {
+        final response = await _dio.get(path, queryParameters: params);
+        debugPrint('[KRA] $path → ${response.statusCode} (attempt=$attempt)');
+        return response;
+      } on DioException catch (e) {
+        final statusCode = e.response?.statusCode;
+        final isTimeout =
+            e.type == DioExceptionType.connectionTimeout ||
+            e.type == DioExceptionType.receiveTimeout ||
+            e.type == DioExceptionType.sendTimeout;
+        final isServerError = statusCode != null && statusCode >= 500;
+        final canRetry = attempt < 2 && (isTimeout || isServerError);
+
+        debugPrint(
+          '[KRA] $path 요청 실패(attempt=$attempt): '
+          '$statusCode ${e.message}',
+        );
+        if (canRetry) {
+          await Future<void>.delayed(const Duration(milliseconds: 500));
+          continue;
+        }
+        return null;
+      } catch (e) {
+        debugPrint('[KRA] $path 오류(attempt=$attempt): $e');
+        return null;
+      }
     }
+
+    return null;
   }
 
   List<T> _parseList<T>(

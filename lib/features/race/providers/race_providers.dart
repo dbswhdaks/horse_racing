@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../../../core/services/kra_api_service.dart';
+import '../../../core/services/kra_video_service.dart';
 import '../../../core/services/ml_api_service.dart';
 import '../../../core/services/supabase_service.dart';
 import '../../../core/services/local_predictor.dart';
@@ -13,7 +14,21 @@ import '../../../models/prediction.dart';
 
 final supabaseServiceProvider = Provider((ref) => SupabaseService());
 final kraApiServiceProvider = Provider((ref) => KraApiService());
+final kraVideoServiceProvider = Provider((ref) => KraVideoService());
 final mlApiServiceProvider = Provider((ref) => MlApiService());
+
+final raceVideoLinksProvider =
+    FutureProvider.family<
+      RaceVideoLinks,
+      ({String meet, String date, int raceNo})
+    >((ref, params) async {
+      final service = ref.read(kraVideoServiceProvider);
+      return service.getRaceVideoLinks(
+        meet: params.meet,
+        date: params.date,
+        raceNo: params.raceNo,
+      );
+    });
 
 final selectedMeetProvider = StateProvider<String>((ref) => '1');
 final selectedDateProvider = StateProvider<DateTime>((ref) => DateTime.now());
@@ -23,289 +38,321 @@ String formatDateParam(DateTime date) => DateFormat('yyyyMMdd').format(date);
 // ── Races: Supabase first → KRA API fallback ──
 
 final racePlanProvider =
-    FutureProvider.family<List<Race>, ({String meet, String? date})>(
-  (ref, params) async {
-    final supa = ref.read(supabaseServiceProvider);
-    try {
-      final races = await supa.getRaces(
-        meet: params.meet,
-        raceDate: params.date,
-      );
-      if (races.isNotEmpty) return races;
-    } catch (_) {}
-
-    final kra = ref.read(kraApiServiceProvider);
-    return kra.getRacePlan(meet: params.meet, rcDate: params.date);
-  },
-);
-
-// ── Entries: Supabase first → KRA API fallback ──
-
-final raceStartListProvider = FutureProvider.family<List<RaceEntry>,
-    ({String meet, String? date, int? raceNo})>(
-  (ref, params) async {
-    final supa = ref.read(supabaseServiceProvider);
-    try {
-      final entries = await supa.getEntries(
-        meet: params.meet,
-        raceDate: params.date,
-        raceNo: params.raceNo,
-      );
-      if (entries.isNotEmpty) {
-        debugPrint('[ENTRIES] Supabase에서 ${entries.length}건 로드 '
-            '(첫 항목: ${entries.first.horseNo}번 ${entries.first.horseName} '
-            '기수=${entries.first.jockeyName})');
-        return entries;
-      }
-    } catch (_) {}
-
-    final kra = ref.read(kraApiServiceProvider);
-    final entries = await kra.getRaceStartList(
-      meet: params.meet,
-      rcDate: params.date,
-      rcNo: params.raceNo,
-    );
-    if (entries.isNotEmpty) {
-      debugPrint('[ENTRIES] KRA API에서 ${entries.length}건 로드 '
-          '(첫 항목: ${entries.first.horseNo}번 ${entries.first.horseName} '
-          '기수=${entries.first.jockeyName})');
-    }
-    return entries;
-  },
-);
-
-// ── 경주별 두수: 날짜 전체 출전표에서 경주별 카운트 ──
-
-final raceHeadCountProvider = FutureProvider.family<Map<int, int>,
-    ({String meet, String date})>(
-  (ref, params) async {
-    final entries = await ref.read(raceStartListProvider(
-      (meet: params.meet, date: params.date, raceNo: null),
-    ).future);
-
-    final counts = <int, int>{};
-    for (final e in entries) {
-      counts[e.raceNo] = (counts[e.raceNo] ?? 0) + 1;
-    }
-    return counts;
-  },
-);
-
-// ── Results: Supabase first → KRA API fallback ──
-
-final raceResultProvider = FutureProvider.family<List<RaceResult>,
-    ({String meet, String? date, int? raceNo})>(
-  (ref, params) async {
-    debugPrint('[RESULT] 조회 시작: meet=${params.meet}, '
-        'date=${params.date}, raceNo=${params.raceNo}');
-
-    final supa = ref.read(supabaseServiceProvider);
-
-    // 1) Supabase: race_no 필터 포함 조회
-    try {
-      final results = await supa.getResults(
-        meet: params.meet,
-        raceDate: params.date,
-        raceNo: params.raceNo,
-      );
-      debugPrint('[RESULT] Supabase(raceNo필터): ${results.length}건');
-      if (results.isNotEmpty) return results;
-    } catch (e) {
-      debugPrint('[RESULT] Supabase 실패: $e');
-    }
-
-    // 2) Supabase: race_no=0 데이터 대비 → 출마표 마명으로 매칭
-    if (params.raceNo != null) {
+    FutureProvider.family<List<Race>, ({String meet, String? date})>((
+      ref,
+      params,
+    ) async {
+      final supa = ref.read(supabaseServiceProvider);
       try {
-        final allResults = await supa.getResults(
+        final races = await supa.getRaces(
           meet: params.meet,
           raceDate: params.date,
         );
-        if (allResults.isNotEmpty) {
-          final entries = await ref.read(raceStartListProvider(
-            (meet: params.meet, date: params.date, raceNo: params.raceNo),
-          ).future);
-          if (entries.isNotEmpty) {
-            final horseNames = entries.map((e) => e.horseName).toSet();
-            final matched = allResults
-                .where((r) => horseNames.contains(r.horseName))
-                .toList();
-            debugPrint('[RESULT] 마명 매칭: 전체 ${allResults.length}건 중 '
-                '${matched.length}건 매칭 (출마표 ${entries.length}두)');
-            if (matched.isNotEmpty) return matched;
-          }
-        }
-      } catch (e) {
-        debugPrint('[RESULT] Supabase 마명매칭 실패: $e');
-      }
-    }
+        if (races.isNotEmpty) return races;
+      } catch (_) {}
 
-    // 3) KRA API fallback
-    final kra = ref.read(kraApiServiceProvider);
-    try {
-      final results = await kra.getRaceResult(
+      final kra = ref.read(kraApiServiceProvider);
+      return kra.getRacePlan(meet: params.meet, rcDate: params.date);
+    });
+
+// ── Entries: Supabase first → KRA API fallback ──
+
+final raceStartListProvider =
+    FutureProvider.family<
+      List<RaceEntry>,
+      ({String meet, String? date, int? raceNo})
+    >((ref, params) async {
+      final supa = ref.read(supabaseServiceProvider);
+      try {
+        final entries = await supa.getEntries(
+          meet: params.meet,
+          raceDate: params.date,
+          raceNo: params.raceNo,
+        );
+        if (entries.isNotEmpty) {
+          debugPrint(
+            '[ENTRIES] Supabase에서 ${entries.length}건 로드 '
+            '(첫 항목: ${entries.first.horseNo}번 ${entries.first.horseName} '
+            '기수=${entries.first.jockeyName})',
+          );
+          return entries;
+        }
+      } catch (_) {}
+
+      final kra = ref.read(kraApiServiceProvider);
+      final entries = await kra.getRaceStartList(
         meet: params.meet,
         rcDate: params.date,
         rcNo: params.raceNo,
       );
-      debugPrint('[RESULT] KRA API: ${results.length}건');
-      if (results.isNotEmpty) return results;
-    } catch (e) {
-      debugPrint('[RESULT] KRA API 실패: $e');
-    }
+      if (entries.isNotEmpty) {
+        debugPrint(
+          '[ENTRIES] KRA API에서 ${entries.length}건 로드 '
+          '(첫 항목: ${entries.first.horseNo}번 ${entries.first.horseName} '
+          '기수=${entries.first.jockeyName})',
+        );
+      }
+      return entries;
+    });
 
-    debugPrint('[RESULT] 모든 소스에서 결과 없음');
-    throw Exception('경주결과를 가져올 수 없습니다');
-  },
-);
+// ── 경주별 두수: 날짜 전체 출전표에서 경주별 카운트 ──
+
+final raceHeadCountProvider =
+    FutureProvider.family<Map<int, int>, ({String meet, String date})>((
+      ref,
+      params,
+    ) async {
+      final entries = await ref.read(
+        raceStartListProvider((
+          meet: params.meet,
+          date: params.date,
+          raceNo: null,
+        )).future,
+      );
+
+      final counts = <int, int>{};
+      for (final e in entries) {
+        counts[e.raceNo] = (counts[e.raceNo] ?? 0) + 1;
+      }
+      return counts;
+    });
+
+// ── Results: Supabase first → KRA API fallback ──
+
+final raceResultProvider =
+    FutureProvider.family<
+      List<RaceResult>,
+      ({String meet, String? date, int? raceNo})
+    >((ref, params) async {
+      debugPrint(
+        '[RESULT] 조회 시작: meet=${params.meet}, '
+        'date=${params.date}, raceNo=${params.raceNo}',
+      );
+
+      final supa = ref.read(supabaseServiceProvider);
+
+      // 1) Supabase: race_no 필터 포함 조회
+      try {
+        final results = await supa.getResults(
+          meet: params.meet,
+          raceDate: params.date,
+          raceNo: params.raceNo,
+        );
+        debugPrint('[RESULT] Supabase(raceNo필터): ${results.length}건');
+        if (results.isNotEmpty) return results;
+      } catch (e) {
+        debugPrint('[RESULT] Supabase 실패: $e');
+      }
+
+      // 2) Supabase: race_no=0 데이터 대비 → 출마표 마명으로 매칭
+      if (params.raceNo != null) {
+        try {
+          final allResults = await supa.getResults(
+            meet: params.meet,
+            raceDate: params.date,
+          );
+          if (allResults.isNotEmpty) {
+            final entries = await ref.read(
+              raceStartListProvider((
+                meet: params.meet,
+                date: params.date,
+                raceNo: params.raceNo,
+              )).future,
+            );
+            if (entries.isNotEmpty) {
+              final horseNames = entries.map((e) => e.horseName).toSet();
+              final matched = allResults
+                  .where((r) => horseNames.contains(r.horseName))
+                  .toList();
+              debugPrint(
+                '[RESULT] 마명 매칭: 전체 ${allResults.length}건 중 '
+                '${matched.length}건 매칭 (출마표 ${entries.length}두)',
+              );
+              if (matched.isNotEmpty) return matched;
+            }
+          }
+        } catch (e) {
+          debugPrint('[RESULT] Supabase 마명매칭 실패: $e');
+        }
+      }
+
+      // 3) KRA API fallback
+      final kra = ref.read(kraApiServiceProvider);
+      try {
+        final results = await kra.getRaceResult(
+          meet: params.meet,
+          rcDate: params.date,
+          rcNo: params.raceNo,
+        );
+        debugPrint('[RESULT] KRA API: ${results.length}건');
+        if (results.isNotEmpty) return results;
+      } catch (e) {
+        debugPrint('[RESULT] KRA API 실패: $e');
+      }
+
+      debugPrint('[RESULT] 모든 소스에서 결과 없음');
+      throw Exception('경주결과를 가져올 수 없습니다');
+    });
 
 // ── Odds: Supabase first → KRA API fallback ──
 
-final oddsProvider = FutureProvider.family<List<Odds>,
-    ({String meet, String? date, int? raceNo})>(
-  (ref, params) async {
-    final supa = ref.read(supabaseServiceProvider);
-    try {
-      final odds = await supa.getOdds(
-        meet: params.meet,
-        raceDate: params.date,
-        raceNo: params.raceNo,
-      );
-      if (odds.isNotEmpty) return odds;
-    } catch (_) {}
-
-    final kra = ref.read(kraApiServiceProvider);
-    return kra.getOddInfo(
-      meet: params.meet,
-      rcDate: params.date,
-      rcNo: params.raceNo,
-    );
-  },
-);
-
-// ── Predictions: Supabase → ML Backend → Local fallback ──
-
-final predictionProvider = FutureProvider.family<PredictionReport?,
-    ({String meet, String date, int raceNo})>(
-  (ref, params) async {
-    // 1) Supabase
-    final supa = ref.read(supabaseServiceProvider);
-    try {
-      final report = await supa.getPredictions(
-        meet: params.meet,
-        raceDate: params.date,
-        raceNo: params.raceNo,
-      );
-      if (report != null && report.predictions.isNotEmpty) return report;
-    } catch (_) {}
-
-    // 2) ML Backend
-    final mlApi = ref.read(mlApiServiceProvider);
-    final remote = await mlApi.getPrediction(
-      meet: params.meet,
-      date: params.date,
-      raceNo: params.raceNo,
-    );
-    if (remote != null) return remote;
-
-    // 3) Local fallback from entry data
-    try {
-      final entries = await ref.read(raceStartListProvider(
-        (meet: params.meet, date: params.date, raceNo: params.raceNo),
-      ).future);
-      if (entries.isNotEmpty) {
-        return LocalPredictor.generate(
+final oddsProvider =
+    FutureProvider.family<
+      List<Odds>,
+      ({String meet, String? date, int? raceNo})
+    >((ref, params) async {
+      final supa = ref.read(supabaseServiceProvider);
+      try {
+        final odds = await supa.getOdds(
           meet: params.meet,
-          date: params.date,
+          raceDate: params.date,
           raceNo: params.raceNo,
-          entries: entries,
         );
-      }
-    } catch (_) {}
+        if (odds.isNotEmpty) return odds;
+      } catch (_) {}
 
-    return null;
-  },
-);
+      final kra = ref.read(kraApiServiceProvider);
+      return kra.getOddInfo(
+        meet: params.meet,
+        rcDate: params.date,
+        rcNo: params.raceNo,
+      );
+    });
+
+// ── Predictions: Supabase → Local fallback → ML Backend ──
+
+final predictionProvider =
+    FutureProvider.family<
+      PredictionReport?,
+      ({String meet, String date, int raceNo})
+    >((ref, params) async {
+      // 1) Supabase
+      final supa = ref.read(supabaseServiceProvider);
+      try {
+        final report = await supa.getPredictions(
+          meet: params.meet,
+          raceDate: params.date,
+          raceNo: params.raceNo,
+        );
+        if (report != null && report.predictions.isNotEmpty) return report;
+      } catch (_) {}
+
+      // 2) Local fallback from entry data (앱 초기 표시 속도 우선)
+      try {
+        final entries = await ref.read(
+          raceStartListProvider((
+            meet: params.meet,
+            date: params.date,
+            raceNo: params.raceNo,
+          )).future,
+        );
+        if (entries.isNotEmpty) {
+          return LocalPredictor.generate(
+            meet: params.meet,
+            date: params.date,
+            raceNo: params.raceNo,
+            entries: entries,
+          );
+        }
+      } catch (_) {}
+
+      // 3) ML Backend
+      final mlApi = ref.read(mlApiServiceProvider);
+      final remote = await mlApi.getPrediction(
+        meet: params.meet,
+        date: params.date,
+        raceNo: params.raceNo,
+      );
+      if (remote != null) return remote;
+
+      return null;
+    });
 
 // ── Horse History: Supabase → KRA API (현재 경마장 12개월 + 타 경마장 6개월) ──
 
 final horseResultsProvider =
-    FutureProvider.family<List<RaceResult>, ({String meet, String horseName})>(
-  (ref, params) async {
-    // 1) Supabase
-    final supa = ref.read(supabaseServiceProvider);
-    try {
-      final results = await supa.getHorseResults(
-        horseName: params.horseName,
-      );
-      if (results.isNotEmpty) return results;
-    } catch (_) {}
+    FutureProvider.family<List<RaceResult>, ({String meet, String horseName})>((
+      ref,
+      params,
+    ) async {
+      // 1) Supabase
+      final supa = ref.read(supabaseServiceProvider);
+      try {
+        final results = await supa.getHorseResults(horseName: params.horseName);
+        if (results.isNotEmpty) return results;
+      } catch (_) {}
 
-    // 2) KRA API — 현재 경마장 12개월 우선, 타 경마장 6개월 보조
-    final kra = ref.read(kraApiServiceProvider);
-    final now = DateTime.now();
-    final allResults = <RaceResult>[];
-    final seenKeys = <String>{};
-    final primaryMeet = params.meet;
-    final otherMeets = ['1', '2', '3'].where((m) => m != primaryMeet).toList();
+      // 2) KRA API — 현재 경마장 12개월 우선, 타 경마장 6개월 보조
+      final kra = ref.read(kraApiServiceProvider);
+      final now = DateTime.now();
+      final allResults = <RaceResult>[];
+      final seenKeys = <String>{};
+      final primaryMeet = params.meet;
+      final otherMeets = [
+        '1',
+        '2',
+        '3',
+      ].where((m) => m != primaryMeet).toList();
 
-    Future<Set<String>> collectDates(String meet, int months) async {
-      final dates = <String>{};
-      final futures = <Future<List<String>>>[];
-      for (int offset = 0; offset <= months; offset++) {
-        final target = DateTime(now.year, now.month - offset, 1);
-        final monthStr = DateFormat('yyyyMM').format(target);
-        futures.add(
-          kra
-              .getRacePlan(meet: meet, rcMonth: monthStr)
-              .then((races) => races.map((r) => r.raceDate).toSet().toList())
-              .catchError((_) => <String>[]),
-        );
+      Future<Set<String>> collectDates(String meet, int months) async {
+        final dates = <String>{};
+        final futures = <Future<List<String>>>[];
+        for (int offset = 0; offset <= months; offset++) {
+          final target = DateTime(now.year, now.month - offset, 1);
+          final monthStr = DateFormat('yyyyMM').format(target);
+          futures.add(
+            kra
+                .getRacePlan(meet: meet, rcMonth: monthStr)
+                .then((races) => races.map((r) => r.raceDate).toSet().toList())
+                .catchError((_) => <String>[]),
+          );
+        }
+        final results = await Future.wait(futures);
+        for (final list in results) {
+          dates.addAll(list);
+        }
+        return dates;
       }
-      final results = await Future.wait(futures);
-      for (final list in results) {
-        dates.addAll(list);
-      }
-      return dates;
-    }
 
-    Future<void> scanDates(String meet, Set<String> dates) async {
-      final jobList = dates.toList();
-      for (int start = 0; start < jobList.length; start += 5) {
-        final batch = jobList.skip(start).take(5).map((dt) async {
-          try {
-            final dayResults =
-                await kra.getRaceResult(meet: meet, rcDate: dt);
-            for (final r in dayResults) {
-              if (r.horseName == params.horseName) {
-                final key = '${r.raceDate}_${r.raceNo}_${r.horseNo}_$meet';
-                if (seenKeys.add(key)) allResults.add(r);
+      Future<void> scanDates(String meet, Set<String> dates) async {
+        final jobList = dates.toList();
+        for (int start = 0; start < jobList.length; start += 5) {
+          final batch = jobList.skip(start).take(5).map((dt) async {
+            try {
+              final dayResults = await kra.getRaceResult(
+                meet: meet,
+                rcDate: dt,
+              );
+              for (final r in dayResults) {
+                if (r.horseName == params.horseName) {
+                  final key = '${r.raceDate}_${r.raceNo}_${r.horseNo}_$meet';
+                  if (seenKeys.add(key)) allResults.add(r);
+                }
               }
-            }
-          } catch (_) {}
-        });
-        await Future.wait(batch);
+            } catch (_) {}
+          });
+          await Future.wait(batch);
+        }
       }
-    }
 
-    // (a) 현재 경마장: 12개월 스캔
-    final primaryDates = await collectDates(primaryMeet, 12);
-    debugPrint('[HORSE] $primaryMeet 경마장 ${primaryDates.length}개 경마일 스캔');
-    await scanDates(primaryMeet, primaryDates);
-    debugPrint('[HORSE] $primaryMeet 스캔 완료 → ${allResults.length}건');
+      // (a) 현재 경마장: 12개월 스캔
+      final primaryDates = await collectDates(primaryMeet, 12);
+      debugPrint('[HORSE] $primaryMeet 경마장 ${primaryDates.length}개 경마일 스캔');
+      await scanDates(primaryMeet, primaryDates);
+      debugPrint('[HORSE] $primaryMeet 스캔 완료 → ${allResults.length}건');
 
-    // (b) 타 경마장: 6개월 스캔 (병렬)
-    final otherDateFutures =
-        otherMeets.map((m) => collectDates(m, 6)).toList();
-    final otherDateSets = await Future.wait(otherDateFutures);
-    for (int i = 0; i < otherMeets.length; i++) {
-      if (otherDateSets[i].isNotEmpty) {
-        await scanDates(otherMeets[i], otherDateSets[i]);
+      // (b) 타 경마장: 6개월 스캔 (병렬)
+      final otherDateFutures = otherMeets
+          .map((m) => collectDates(m, 6))
+          .toList();
+      final otherDateSets = await Future.wait(otherDateFutures);
+      for (int i = 0; i < otherMeets.length; i++) {
+        if (otherDateSets[i].isNotEmpty) {
+          await scanDates(otherMeets[i], otherDateSets[i]);
+        }
       }
-    }
 
-    debugPrint('[HORSE] 전체 스캔 완료 → 총 ${allResults.length}건');
-    allResults.sort((a, b) => b.raceDate.compareTo(a.raceDate));
-    return allResults;
-  },
-);
+      debugPrint('[HORSE] 전체 스캔 완료 → 총 ${allResults.length}건');
+      allResults.sort((a, b) => b.raceDate.compareTo(a.raceDate));
+      return allResults;
+    });

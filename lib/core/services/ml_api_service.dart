@@ -13,6 +13,10 @@ class MlApiService {
     try {
       final response = await _dio.get(
         '/predict/$meet/$date/$raceNo',
+        options: Options(
+          connectTimeout: const Duration(seconds: 2),
+          receiveTimeout: const Duration(seconds: 3),
+        ),
       );
       if (response.data != null) {
         return PredictionReport.fromJson(response.data);

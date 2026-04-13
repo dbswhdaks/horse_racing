@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/constants/api_constants.dart';
+import '../../../core/services/kra_video_service.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/shimmer_loading.dart';
 import '../../../models/race.dart';
@@ -10,6 +11,8 @@ import '../../../models/race_entry.dart';
 import '../../../models/odds.dart';
 import '../../../models/prediction.dart';
 import '../providers/race_providers.dart';
+import '../widgets/race_auto_refresh_hook.dart';
+import '../widgets/race_video_panel.dart';
 
 class RaceEntryScreen extends ConsumerWidget {
   final String meet;
@@ -25,23 +28,18 @@ class RaceEntryScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final raceAsync = ref.watch(
-      racePlanProvider((meet: meet, date: date)),
-    );
+    final raceAsync = ref.watch(racePlanProvider((meet: meet, date: date)));
     final entriesAsync = ref.watch(
-      raceStartListProvider(
-        (meet: meet, date: date, raceNo: raceNo),
-      ),
+      raceStartListProvider((meet: meet, date: date, raceNo: raceNo)),
     );
     final oddsAsync = ref.watch(
-      oddsProvider(
-        (meet: meet, date: date, raceNo: raceNo),
-      ),
+      oddsProvider((meet: meet, date: date, raceNo: raceNo)),
     );
     final predAsync = ref.watch(
-      predictionProvider(
-        (meet: meet, date: date, raceNo: raceNo),
-      ),
+      predictionProvider((meet: meet, date: date, raceNo: raceNo)),
+    );
+    final videoAsync = ref.watch(
+      raceVideoLinksProvider((meet: meet, date: date, raceNo: raceNo)),
     );
 
     final meetName = ApiConstants.meetNames[meet] ?? meet;
@@ -61,11 +59,37 @@ class RaceEntryScreen extends ConsumerWidget {
                   IconButton(
                     icon: const Icon(Icons.emoji_events_rounded),
                     tooltip: '경주결과',
-                    onPressed: () => context.push(
-                      '/result/$meet/$date/$raceNo',
-                    ),
+                    onPressed: () =>
+                        context.push('/result/$meet/$date/$raceNo'),
                   ),
               ],
+            ),
+
+            SliverToBoxAdapter(
+              child: RaceAutoRefreshHook(
+                meet: meet,
+                date: date,
+                raceNo: raceNo,
+              ),
+            ),
+
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+                child: videoAsync.when(
+                  loading: () => const ShimmerLoading(height: 78),
+                  error: (_, __) => RaceVideoPanel(
+                    links: RaceVideoLinks(
+                      liveUrl:
+                          '${ApiConstants.todayRaceBaseUrl}${ApiConstants.todayRaceScorePath}',
+                      paradeUrl: ApiConstants.todayRaceParadeVideoUrl,
+                      hasVideoSection: false,
+                      isRaceVideoFromApi: false,
+                    ),
+                  ),
+                  data: (links) => RaceVideoPanel(links: links),
+                ),
+              ),
             ),
 
             // AI 예측 그래프
@@ -81,8 +105,7 @@ class RaceEntryScreen extends ConsumerWidget {
                     return const SizedBox.shrink();
                   }
                   final entries = entriesAsync.valueOrNull ?? [];
-                  return _AiPredictionChart(
-                      report: report, entries: entries);
+                  return _AiPredictionChart(report: report, entries: entries);
                 },
               ),
             ),
@@ -139,14 +162,16 @@ class RaceEntryScreen extends ConsumerWidget {
                     const Spacer(),
                     if (_isRaceFinished(race))
                       GestureDetector(
-                        onTap: () => context.push(
-                          '/result/$meet/$date/$raceNo',
-                        ),
+                        onTap: () =>
+                            context.push('/result/$meet/$date/$raceNo'),
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Icon(Icons.emoji_events_rounded,
-                                size: 15, color: AppTheme.winColor),
+                            Icon(
+                              Icons.emoji_events_rounded,
+                              size: 15,
+                              color: AppTheme.winColor,
+                            ),
                             const SizedBox(width: 4),
                             Text(
                               '결과',
@@ -156,8 +181,11 @@ class RaceEntryScreen extends ConsumerWidget {
                                 color: AppTheme.winColor,
                               ),
                             ),
-                            Icon(Icons.chevron_right_rounded,
-                                size: 18, color: AppTheme.winColor),
+                            Icon(
+                              Icons.chevron_right_rounded,
+                              size: 18,
+                              color: AppTheme.winColor,
+                            ),
                           ],
                         ),
                       ),
@@ -182,16 +210,25 @@ class RaceEntryScreen extends ConsumerWidget {
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.error_outline,
-                          size: 48, color: Colors.grey.shade600),
+                      Icon(
+                        Icons.error_outline,
+                        size: 48,
+                        color: Colors.grey.shade600,
+                      ),
                       const SizedBox(height: 12),
-                      Text('출마표를 불러올 수 없습니다',
-                          style: TextStyle(color: Colors.grey.shade400)),
+                      Text(
+                        '출마표를 불러올 수 없습니다',
+                        style: TextStyle(color: Colors.grey.shade400),
+                      ),
                       const SizedBox(height: 16),
                       FilledButton.icon(
-                        onPressed: () => ref.invalidate(raceStartListProvider(
-                          (meet: meet, date: date, raceNo: raceNo),
-                        )),
+                        onPressed: () => ref.invalidate(
+                          raceStartListProvider((
+                            meet: meet,
+                            date: date,
+                            raceNo: raceNo,
+                          )),
+                        ),
                         icon: const Icon(Icons.refresh, size: 18),
                         label: const Text('다시 시도'),
                       ),
@@ -213,30 +250,28 @@ class RaceEntryScreen extends ConsumerWidget {
                 final distance = race?.distance ?? 0;
 
                 return SliverList(
-                  delegate: SliverChildBuilderDelegate(
-                    (ctx, i) {
-                      final entry = sorted[i];
-                      final winOdds = _findWinOdds(odds, entry.horseNo);
-                      final pred =
-                          _findPrediction(predictions, entry.horseNo);
-                      final predRank =
-                          _predictionRank(predictions, entry.horseNo);
+                  delegate: SliverChildBuilderDelegate((ctx, i) {
+                    final entry = sorted[i];
+                    final winOdds = _findWinOdds(odds, entry.horseNo);
+                    final pred = _findPrediction(predictions, entry.horseNo);
+                    final predRank = _predictionRank(
+                      predictions,
+                      entry.horseNo,
+                    );
 
-                      return _HorseCard(
-                        entry: entry,
-                        winOdds: winOdds,
-                        prediction: pred,
-                        predictionRank: predRank,
-                        distance: distance,
-                        onTap: () => context.push(
-                          '/horse/${Uri.encodeComponent(entry.horseName)}'
-                          '?meet=$meet',
-                          extra: entry,
-                        ),
-                      );
-                    },
-                    childCount: sorted.length,
-                  ),
+                    return _HorseCard(
+                      entry: entry,
+                      winOdds: winOdds,
+                      prediction: pred,
+                      predictionRank: predRank,
+                      distance: distance,
+                      onTap: () => context.push(
+                        '/horse/${Uri.encodeComponent(entry.horseName)}'
+                        '?meet=$meet',
+                        extra: entry,
+                      ),
+                    );
+                  }, childCount: sorted.length),
                 );
               },
             ),
@@ -246,9 +281,8 @@ class RaceEntryScreen extends ConsumerWidget {
                 child: Padding(
                   padding: const EdgeInsets.fromLTRB(12, 16, 12, 32),
                   child: FilledButton.icon(
-                    onPressed: () => context.push(
-                      '/result/$meet/$date/$raceNo',
-                    ),
+                    onPressed: () =>
+                        context.push('/result/$meet/$date/$raceNo'),
                     icon: const Icon(Icons.emoji_events_rounded),
                     label: const Text(
                       '경주결과 보기',
@@ -348,13 +382,13 @@ class _RacePacePreview extends StatelessWidget {
     final rating = entry.rating;
     final winRate = entry.winRate;
     final totalRaces = entry.totalRaces;
-    
+
     if (pred != null && pred.winProbability > 15) {
       if (rating >= 80) return '선행';
       if (rating >= 60) return '선입';
       return '추입';
     }
-    
+
     if (totalRaces < 3) return '미지수';
     if (rating >= 85 && winRate >= 20) return '선행';
     if (rating >= 70) return '선입';
@@ -397,17 +431,22 @@ class _RacePacePreview extends StatelessWidget {
   Widget build(BuildContext context) {
     final sorted = List<RaceEntry>.from(entries)
       ..sort((a, b) => a.horseNo.compareTo(b.horseNo));
-    
+
     final horsePaces = <int, _HorsePaceData>{};
     for (final entry in sorted) {
-      final pred = predictions.where((p) => p.horseNo == entry.horseNo).firstOrNull;
+      final pred = predictions
+          .where((p) => p.horseNo == entry.horseNo)
+          .firstOrNull;
       final style = _getRunningStyle(entry, pred);
       horsePaces[entry.horseNo] = _HorsePaceData(
         horseNo: entry.horseNo,
         horseName: entry.horseName,
         style: style,
         color: _styleColor(style),
-        positions: List.generate(4, (i) => _estimatePosition(style, i, sorted.length)),
+        positions: List.generate(
+          4,
+          (i) => _estimatePosition(style, i, sorted.length),
+        ),
       );
     }
 
@@ -425,7 +464,11 @@ class _RacePacePreview extends StatelessWidget {
         children: [
           Row(
             children: [
-              Icon(Icons.show_chart_rounded, size: 18, color: Colors.cyanAccent),
+              Icon(
+                Icons.show_chart_rounded,
+                size: 18,
+                color: Colors.cyanAccent,
+              ),
               const SizedBox(width: 6),
               const Text(
                 '예상 전개',
@@ -458,7 +501,9 @@ class _RacePacePreview extends StatelessWidget {
                       style: TextStyle(
                         fontSize: 10,
                         fontWeight: FontWeight.w600,
-                        color: isLast ? AppTheme.winColor : Colors.grey.shade500,
+                        color: isLast
+                            ? AppTheme.winColor
+                            : Colors.grey.shade500,
                       ),
                     ),
                     const SizedBox(height: 4),
@@ -487,7 +532,10 @@ class _RacePacePreview extends StatelessWidget {
                 children: [
                   Container(
                     width: 48,
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 3,
+                    ),
                     decoration: BoxDecoration(
                       color: _styleColor(style).withValues(alpha: 0.15),
                       borderRadius: BorderRadius.circular(6),
@@ -510,7 +558,9 @@ class _RacePacePreview extends StatelessWidget {
                       children: horses.map((h) {
                         return Container(
                           padding: const EdgeInsets.symmetric(
-                              horizontal: 8, vertical: 4),
+                            horizontal: 8,
+                            vertical: 4,
+                          ),
                           decoration: BoxDecoration(
                             color: h.color.withValues(alpha: 0.1),
                             borderRadius: BorderRadius.circular(6),
@@ -536,180 +586,203 @@ class _RacePacePreview extends StatelessWidget {
           }),
 
           const SizedBox(height: 12),
-          
-          Builder(builder: (_) {
-            final frontRunners = horsePaces.values
-                .where((h) => h.style == '선행' || h.style == '선입')
-                .length;
-            final closers = horsePaces.values
-                .where((h) => h.style == '추입' || h.style == '후입')
-                .length;
-            final total = horsePaces.length;
-            
-            final isFrontHeavy = frontRunners >= 4 || (frontRunners >= 3 && total <= 10);
-            final isCloserHeavy = closers >= 4 || (closers >= 3 && frontRunners <= 1);
-            
-            String advantage;
-            String reason;
-            Color advColor;
-            IconData advIcon;
-            List<int> advantageHorses;
-            
-            if (isFrontHeavy) {
-              advantage = '추입마 유리';
-              reason = '선행마가 많아 앞쪽 경합이 치열할 것으로 예상됩니다. 후반 추입 전법이 유리합니다.';
-              advColor = Colors.orangeAccent;
-              advIcon = Icons.speed_rounded;
-              advantageHorses = horsePaces.values
-                  .where((h) => h.style == '추입' || h.style == '후입')
-                  .map((h) => h.horseNo)
-                  .toList();
-            } else if (isCloserHeavy || frontRunners <= 1) {
-              advantage = '선행마 유리';
-              reason = '선행마가 적어 편한 페이스로 레이스를 이끌 수 있습니다. 선행/선입 전법이 유리합니다.';
-              advColor = AppTheme.winColor;
-              advIcon = Icons.flag_rounded;
-              advantageHorses = horsePaces.values
+
+          Builder(
+            builder: (_) {
+              final frontRunners = horsePaces.values
                   .where((h) => h.style == '선행' || h.style == '선입')
-                  .map((h) => h.horseNo)
-                  .toList();
-            } else {
-              advantage = '균형 전개';
-              reason = '선행과 추입이 균형을 이뤄 다양한 전법이 가능한 경주입니다.';
-              advColor = Colors.cyanAccent;
-              advIcon = Icons.balance_rounded;
-              advantageHorses = [];
-            }
-            
-            return Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [
-                    advColor.withValues(alpha: 0.15),
-                    advColor.withValues(alpha: 0.05),
-                  ],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: advColor.withValues(alpha: 0.3)),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: advColor.withValues(alpha: 0.2),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Icon(advIcon, size: 20, color: advColor),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              '전개 분석',
-                              style: TextStyle(fontSize: 10, color: Colors.grey.shade500),
-                            ),
-                            Text(
-                              advantage,
-                              style: TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.w900,
-                                color: advColor,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.08),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              '선행 $frontRunners',
-                              style: TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w600,
-                                color: AppTheme.winColor,
-                              ),
-                            ),
-                            Text(
-                              ' / ',
-                              style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
-                            ),
-                            Text(
-                              '추입 $closers',
-                              style: TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w600,
-                                color: Colors.orangeAccent,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
+                  .length;
+              final closers = horsePaces.values
+                  .where((h) => h.style == '추입' || h.style == '후입')
+                  .length;
+              final total = horsePaces.length;
+
+              final isFrontHeavy =
+                  frontRunners >= 4 || (frontRunners >= 3 && total <= 10);
+              final isCloserHeavy =
+                  closers >= 4 || (closers >= 3 && frontRunners <= 1);
+
+              String advantage;
+              String reason;
+              Color advColor;
+              IconData advIcon;
+              List<int> advantageHorses;
+
+              if (isFrontHeavy) {
+                advantage = '추입마 유리';
+                reason = '선행마가 많아 앞쪽 경합이 치열할 것으로 예상됩니다. 후반 추입 전법이 유리합니다.';
+                advColor = Colors.orangeAccent;
+                advIcon = Icons.speed_rounded;
+                advantageHorses = horsePaces.values
+                    .where((h) => h.style == '추입' || h.style == '후입')
+                    .map((h) => h.horseNo)
+                    .toList();
+              } else if (isCloserHeavy || frontRunners <= 1) {
+                advantage = '선행마 유리';
+                reason = '선행마가 적어 편한 페이스로 레이스를 이끌 수 있습니다. 선행/선입 전법이 유리합니다.';
+                advColor = AppTheme.winColor;
+                advIcon = Icons.flag_rounded;
+                advantageHorses = horsePaces.values
+                    .where((h) => h.style == '선행' || h.style == '선입')
+                    .map((h) => h.horseNo)
+                    .toList();
+              } else {
+                advantage = '균형 전개';
+                reason = '선행과 추입이 균형을 이뤄 다양한 전법이 가능한 경주입니다.';
+                advColor = Colors.cyanAccent;
+                advIcon = Icons.balance_rounded;
+                advantageHorses = [];
+              }
+
+              return Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [
+                      advColor.withValues(alpha: 0.15),
+                      advColor.withValues(alpha: 0.05),
                     ],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
                   ),
-                  const SizedBox(height: 10),
-                  Text(
-                    reason,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.grey.shade300,
-                      height: 1.4,
-                    ),
-                  ),
-                  if (advantageHorses.isNotEmpty) ...[
-                    const SizedBox(height: 10),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: advColor.withValues(alpha: 0.3)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
                     Row(
                       children: [
-                        Icon(Icons.thumb_up_alt_rounded, size: 14, color: advColor),
-                        const SizedBox(width: 6),
-                        Text(
-                          '유리한 마번: ',
-                          style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: advColor.withValues(alpha: 0.2),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Icon(advIcon, size: 20, color: advColor),
                         ),
+                        const SizedBox(width: 10),
                         Expanded(
-                          child: Wrap(
-                            spacing: 4,
-                            children: advantageHorses.take(6).map((no) {
-                              return Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                                decoration: BoxDecoration(
-                                  color: advColor.withValues(alpha: 0.2),
-                                  borderRadius: BorderRadius.circular(4),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                '전개 분석',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  color: Colors.grey.shade500,
                                 ),
-                                child: Text(
-                                  '$no',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w800,
-                                    color: advColor,
-                                  ),
+                              ),
+                              Text(
+                                advantage,
+                                style: TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w900,
+                                  color: advColor,
                                 ),
-                              );
-                            }).toList(),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 6,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.08),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                '선행 $frontRunners',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppTheme.winColor,
+                                ),
+                              ),
+                              Text(
+                                ' / ',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: Colors.grey.shade500,
+                                ),
+                              ),
+                              Text(
+                                '추입 $closers',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.orangeAccent,
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                       ],
                     ),
+                    const SizedBox(height: 10),
+                    Text(
+                      reason,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey.shade300,
+                        height: 1.4,
+                      ),
+                    ),
+                    if (advantageHorses.isNotEmpty) ...[
+                      const SizedBox(height: 10),
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.thumb_up_alt_rounded,
+                            size: 14,
+                            color: advColor,
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            '유리한 마번: ',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: Colors.grey.shade500,
+                            ),
+                          ),
+                          Expanded(
+                            child: Wrap(
+                              spacing: 4,
+                              children: advantageHorses.take(6).map((no) {
+                                return Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 2,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: advColor.withValues(alpha: 0.2),
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: Text(
+                                    '$no',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w800,
+                                      color: advColor,
+                                    ),
+                                  ),
+                                );
+                              }).toList(),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                   ],
-                ],
-              ),
-            );
-          }),
+                ),
+              );
+            },
+          ),
         ],
       ),
     );
@@ -780,7 +853,11 @@ class _ComprehensiveRecommendation extends StatelessWidget {
                   color: Colors.amber.withValues(alpha: 0.2),
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: const Icon(Icons.recommend_rounded, size: 22, color: Colors.amber),
+                child: const Icon(
+                  Icons.recommend_rounded,
+                  size: 22,
+                  color: Colors.amber,
+                ),
               ),
               const SizedBox(width: 10),
               const Expanded(
@@ -804,15 +881,21 @@ class _ComprehensiveRecommendation extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 16),
-          
+
           ...recommendations.asMap().entries.map((e) {
             final idx = e.key;
             final rec = e.value;
-            final rankColors = [Colors.amber, Colors.grey.shade300, Colors.orange.shade300];
+            final rankColors = [
+              Colors.amber,
+              Colors.grey.shade300,
+              Colors.orange.shade300,
+            ];
             final rankColor = rankColors[idx.clamp(0, 2)];
-            
+
             return Container(
-              margin: EdgeInsets.only(bottom: idx < recommendations.length - 1 ? 10 : 0),
+              margin: EdgeInsets.only(
+                bottom: idx < recommendations.length - 1 ? 10 : 0,
+              ),
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
                 color: rankColor.withValues(alpha: 0.08),
@@ -844,7 +927,10 @@ class _ComprehensiveRecommendation extends StatelessWidget {
                       ),
                       const SizedBox(width: 10),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 4,
+                        ),
                         decoration: BoxDecoration(
                           color: rankColor.withValues(alpha: 0.2),
                           borderRadius: BorderRadius.circular(8),
@@ -871,9 +957,14 @@ class _ComprehensiveRecommendation extends StatelessWidget {
                         ),
                       ),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 4,
+                        ),
                         decoration: BoxDecoration(
-                          color: _getScoreColor(rec.totalScore).withValues(alpha: 0.15),
+                          color: _getScoreColor(
+                            rec.totalScore,
+                          ).withValues(alpha: 0.15),
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: Text(
@@ -888,28 +979,51 @@ class _ComprehensiveRecommendation extends StatelessWidget {
                     ],
                   ),
                   const SizedBox(height: 10),
-                  
+
                   Row(
                     children: [
-                      _ScoreBadge(label: '레이팅', score: rec.ratingScore, maxScore: 25),
+                      _ScoreBadge(
+                        label: '레이팅',
+                        score: rec.ratingScore,
+                        maxScore: 25,
+                      ),
                       const SizedBox(width: 6),
-                      _ScoreBadge(label: '성적', score: rec.performanceScore, maxScore: 25),
+                      _ScoreBadge(
+                        label: '성적',
+                        score: rec.performanceScore,
+                        maxScore: 25,
+                      ),
                       const SizedBox(width: 6),
-                      _ScoreBadge(label: '기수', score: rec.jockeyScore, maxScore: 20),
+                      _ScoreBadge(
+                        label: '기수',
+                        score: rec.jockeyScore,
+                        maxScore: 20,
+                      ),
                       const SizedBox(width: 6),
-                      _ScoreBadge(label: '거리', score: rec.distanceScore, maxScore: 15),
+                      _ScoreBadge(
+                        label: '거리',
+                        score: rec.distanceScore,
+                        maxScore: 15,
+                      ),
                       const SizedBox(width: 6),
-                      _ScoreBadge(label: '전개', score: rec.paceScore, maxScore: 15),
+                      _ScoreBadge(
+                        label: '전개',
+                        score: rec.paceScore,
+                        maxScore: 15,
+                      ),
                     ],
                   ),
                   const SizedBox(height: 10),
-                  
+
                   Wrap(
                     spacing: 6,
                     runSpacing: 4,
                     children: rec.reasons.map((reason) {
                       return Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
                         decoration: BoxDecoration(
                           color: Colors.white.withValues(alpha: 0.08),
                           borderRadius: BorderRadius.circular(6),
@@ -939,7 +1053,7 @@ class _ComprehensiveRecommendation extends StatelessWidget {
               ),
             );
           }),
-          
+
           const SizedBox(height: 12),
           Container(
             padding: const EdgeInsets.all(10),
@@ -968,19 +1082,24 @@ class _ComprehensiveRecommendation extends StatelessWidget {
   List<_HorseRecommendation> _analyzeAndRecommend() {
     final recs = <_HorseRecommendation>[];
     if (entries.isEmpty) return recs;
-    
+
     // 1. 경주 내 상대적 위치 분석
-    final ratings = entries.map((e) => e.rating).toList()..sort((a, b) => b.compareTo(a));
+    final ratings = entries.map((e) => e.rating).toList()
+      ..sort((a, b) => b.compareTo(a));
     final maxRating = ratings.isNotEmpty ? ratings.first : 100.0;
-    final avgRating = ratings.isNotEmpty ? ratings.reduce((a, b) => a + b) / ratings.length : 50.0;
-    
+    final avgRating = ratings.isNotEmpty
+        ? ratings.reduce((a, b) => a + b) / ratings.length
+        : 50.0;
+
     // 2. 전개 분석
     final runningStyles = <int, String>{};
     final frontRunners = <int>[];
     final closers = <int>[];
-    
+
     for (final entry in entries) {
-      final pred = predictions.where((p) => p.horseNo == entry.horseNo).firstOrNull;
+      final pred = predictions
+          .where((p) => p.horseNo == entry.horseNo)
+          .firstOrNull;
       final style = _getRunningStyle(entry, pred);
       runningStyles[entry.horseNo] = style;
       if (style == '선행' || style == '선입') {
@@ -989,11 +1108,12 @@ class _ComprehensiveRecommendation extends StatelessWidget {
         closers.add(entry.horseNo);
       }
     }
-    
-    final isFrontHeavy = frontRunners.length >= 4 || 
+
+    final isFrontHeavy =
+        frontRunners.length >= 4 ||
         (frontRunners.length >= 3 && entries.length <= 10);
     final isCloserFavored = closers.length >= 3 && frontRunners.length <= 2;
-    
+
     // 3. 배당률 분석 (낮은 배당 = 인기마)
     final oddsMap = <int, double>{};
     for (final o in odds) {
@@ -1002,23 +1122,25 @@ class _ComprehensiveRecommendation extends StatelessWidget {
       }
     }
     final hasOdds = oddsMap.isNotEmpty;
-    final avgOdds = hasOdds 
-        ? oddsMap.values.reduce((a, b) => a + b) / oddsMap.length 
+    final avgOdds = hasOdds
+        ? oddsMap.values.reduce((a, b) => a + b) / oddsMap.length
         : 10.0;
 
     for (final entry in entries) {
       final reasons = <String>[];
-      final pred = predictions.where((p) => p.horseNo == entry.horseNo).firstOrNull;
+      final pred = predictions
+          .where((p) => p.horseNo == entry.horseNo)
+          .firstOrNull;
       final style = runningStyles[entry.horseNo] ?? '중단';
       final winOdds = oddsMap[entry.horseNo] ?? 0;
-      
+
       // ═══════════════════════════════════════════════════
       // 1. 레이팅 점수 (25점) - 상대적 위치 기반
       // ═══════════════════════════════════════════════════
       double ratingScore = 0;
       final ratingRank = ratings.indexOf(entry.rating) + 1;
       final ratingPercentile = entry.rating / maxRating;
-      
+
       if (ratingRank <= 2 && entry.rating >= 80) {
         ratingScore = 25;
         reasons.add('레이팅 ${ratingRank}위 (${entry.rating.toStringAsFixed(0)})');
@@ -1034,7 +1156,7 @@ class _ComprehensiveRecommendation extends StatelessWidget {
       } else {
         ratingScore = 5;
       }
-      
+
       // ═══════════════════════════════════════════════════
       // 2. 성적 점수 (25점) - 승률 + 입상률 + 경험
       // ═══════════════════════════════════════════════════
@@ -1042,7 +1164,7 @@ class _ComprehensiveRecommendation extends StatelessWidget {
       final winRate = entry.winRate;
       final placeRate = entry.placeRate;
       final totalRaces = entry.totalRaces;
-      
+
       // 승률 기반 (15점)
       if (winRate >= 30) {
         performanceScore += 15;
@@ -1055,17 +1177,18 @@ class _ComprehensiveRecommendation extends StatelessWidget {
       } else if (winRate > 0) {
         performanceScore += 4;
       }
-      
+
       // 입상률 기반 (7점)
       if (placeRate >= 50) {
         performanceScore += 7;
-        if (winRate < 15) reasons.add('안정적 입상 ${placeRate.toStringAsFixed(0)}%');
+        if (winRate < 15)
+          reasons.add('안정적 입상 ${placeRate.toStringAsFixed(0)}%');
       } else if (placeRate >= 35) {
         performanceScore += 5;
       } else if (placeRate >= 20) {
         performanceScore += 3;
       }
-      
+
       // 경험치 보너스 (3점)
       if (totalRaces >= 20 && entry.winCount >= 3) {
         performanceScore += 3;
@@ -1075,12 +1198,12 @@ class _ComprehensiveRecommendation extends StatelessWidget {
       } else if (totalRaces >= 5) {
         performanceScore += 1;
       }
-      
+
       // ═══════════════════════════════════════════════════
       // 3. AI 예측 + 배당 점수 (20점)
       // ═══════════════════════════════════════════════════
       double jockeyScore = 0;
-      
+
       // AI 예측 (12점)
       if (pred != null && pred.winProbability > 0) {
         if (pred.winProbability >= 25) {
@@ -1095,7 +1218,7 @@ class _ComprehensiveRecommendation extends StatelessWidget {
           jockeyScore += 4;
         }
       }
-      
+
       // 배당률 분석 (8점) - 낮은 배당 = 인기마
       if (hasOdds && winOdds > 0) {
         if (winOdds <= 3.0) {
@@ -1113,12 +1236,12 @@ class _ComprehensiveRecommendation extends StatelessWidget {
         // 배당 없으면 AI 예측으로 보정
         jockeyScore += (pred.winProbability / 100 * 8).clamp(0, 8);
       }
-      
+
       // ═══════════════════════════════════════════════════
       // 4. 거리 적성 점수 (15점)
       // ═══════════════════════════════════════════════════
       double distanceScore = 0;
-      
+
       // 해당 거리에서의 승리 경험
       if (entry.winCount >= 2 && totalRaces >= 5) {
         distanceScore = 15;
@@ -1135,12 +1258,12 @@ class _ComprehensiveRecommendation extends StatelessWidget {
       } else {
         distanceScore = 2; // 첫 출전
       }
-      
+
       // ═══════════════════════════════════════════════════
       // 5. 전개 유리 점수 (15점)
       // ═══════════════════════════════════════════════════
       double paceScore = 5; // 기본점
-      
+
       if (isFrontHeavy) {
         // 선행마 많음 → 추입마 유리
         if (style == '추입' || style == '후입') {
@@ -1167,32 +1290,39 @@ class _ComprehensiveRecommendation extends StatelessWidget {
           paceScore = 7;
         }
       }
-      
+
       // ═══════════════════════════════════════════════════
       // 종합 점수 계산
       // ═══════════════════════════════════════════════════
-      final totalScore = ratingScore + performanceScore + jockeyScore + distanceScore + paceScore;
-      
-      recs.add(_HorseRecommendation(
-        horseNo: entry.horseNo,
-        horseName: entry.horseName,
-        totalScore: totalScore,
-        ratingScore: ratingScore,
-        performanceScore: performanceScore,
-        jockeyScore: jockeyScore,
-        distanceScore: distanceScore,
-        paceScore: paceScore,
-        reasons: reasons,
-      ));
+      final totalScore =
+          ratingScore +
+          performanceScore +
+          jockeyScore +
+          distanceScore +
+          paceScore;
+
+      recs.add(
+        _HorseRecommendation(
+          horseNo: entry.horseNo,
+          horseName: entry.horseName,
+          totalScore: totalScore,
+          ratingScore: ratingScore,
+          performanceScore: performanceScore,
+          jockeyScore: jockeyScore,
+          distanceScore: distanceScore,
+          paceScore: paceScore,
+          reasons: reasons,
+        ),
+      );
     }
-    
+
     // 점수순 정렬 + 동점시 레이팅 높은 순
     recs.sort((a, b) {
       final scoreDiff = b.totalScore.compareTo(a.totalScore);
       if (scoreDiff != 0) return scoreDiff;
       return b.ratingScore.compareTo(a.ratingScore);
     });
-    
+
     return recs.take(3).toList();
   }
 
@@ -1200,13 +1330,13 @@ class _ComprehensiveRecommendation extends StatelessWidget {
     final rating = entry.rating;
     final winRate = entry.winRate;
     final totalRaces = entry.totalRaces;
-    
+
     if (pred != null && pred.winProbability > 15) {
       if (rating >= 80) return '선행';
       if (rating >= 60) return '선입';
       return '추입';
     }
-    
+
     if (totalRaces < 3) return '미지수';
     if (rating >= 85 && winRate >= 20) return '선행';
     if (rating >= 70) return '선입';
@@ -1223,7 +1353,8 @@ class _ComprehensiveRecommendation extends StatelessWidget {
 
   IconData _getReasonIcon(String reason) {
     if (reason.contains('레이팅')) return Icons.star_rounded;
-    if (reason.contains('승률') || reason.contains('입상')) return Icons.emoji_events_rounded;
+    if (reason.contains('승률') || reason.contains('입상'))
+      return Icons.emoji_events_rounded;
     if (reason.contains('AI')) return Icons.auto_awesome_rounded;
     if (reason.contains('거리')) return Icons.straighten_rounded;
     if (reason.contains('전개')) return Icons.speed_rounded;
@@ -1272,10 +1403,10 @@ class _ScoreBadge extends StatelessWidget {
     final color = ratio >= 0.8
         ? AppTheme.positiveGreen
         : ratio >= 0.6
-            ? Colors.cyanAccent
-            : ratio >= 0.4
-                ? Colors.orangeAccent
-                : Colors.grey;
+        ? Colors.cyanAccent
+        : ratio >= 0.4
+        ? Colors.orangeAccent
+        : Colors.grey;
 
     return Expanded(
       child: Column(
@@ -1325,10 +1456,7 @@ class _AiPredictionChart extends StatelessWidget {
   final PredictionReport report;
   final List<RaceEntry> entries;
 
-  const _AiPredictionChart({
-    required this.report,
-    required this.entries,
-  });
+  const _AiPredictionChart({required this.report, required this.entries});
 
   String _jockeyFor(Prediction p) {
     if (p.jockeyName.isNotEmpty) return p.jockeyName;
@@ -1366,31 +1494,34 @@ class _AiPredictionChart extends StatelessWidget {
           end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-            color: Colors.deepPurple.withValues(alpha: 0.4)),
+        border: Border.all(color: Colors.deepPurple.withValues(alpha: 0.4)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Icon(Icons.auto_awesome,
-                  size: 18, color: Colors.purpleAccent.shade100),
+              Icon(
+                Icons.auto_awesome,
+                size: 18,
+                color: Colors.purpleAccent.shade100,
+              ),
               const SizedBox(width: 6),
-              const Text('AI 승률 예측 TOP 3',
-                  style:
-                      TextStyle(fontSize: 15, fontWeight: FontWeight.w800)),
+              const Text(
+                'AI 승률 예측 TOP 3',
+                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800),
+              ),
               const Spacer(),
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
                   color: Colors.deepPurple.withValues(alpha: 0.3),
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: Text('v${report.modelVersion}',
-                    style: TextStyle(
-                        fontSize: 10, color: Colors.grey.shade400)),
+                child: Text(
+                  'v${report.modelVersion}',
+                  style: TextStyle(fontSize: 10, color: Colors.grey.shade400),
+                ),
               ),
             ],
           ),
@@ -1408,12 +1539,13 @@ class _AiPredictionChart extends StatelessWidget {
                   padding: EdgeInsets.only(left: idx > 0 ? 8 : 0),
                   child: Container(
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 8, vertical: 12),
+                      horizontal: 8,
+                      vertical: 12,
+                    ),
                     decoration: BoxDecoration(
                       color: color.withValues(alpha: 0.08),
                       borderRadius: BorderRadius.circular(12),
-                      border:
-                          Border.all(color: color.withValues(alpha: 0.3)),
+                      border: Border.all(color: color.withValues(alpha: 0.3)),
                     ),
                     child: Column(
                       children: [
@@ -1440,7 +1572,9 @@ class _AiPredictionChart extends StatelessWidget {
                         // 마번 (방송 스타일: "1번마")
                         Container(
                           padding: const EdgeInsets.symmetric(
-                              horizontal: 8, vertical: 3),
+                            horizontal: 8,
+                            vertical: 3,
+                          ),
                           decoration: BoxDecoration(
                             color: color.withValues(alpha: 0.15),
                             borderRadius: BorderRadius.circular(6),
@@ -1495,29 +1629,31 @@ class _AiPredictionChart extends StatelessWidget {
                         const SizedBox(height: 6),
 
                         // 레이팅 & 승률 (과거 전적)
-                        Builder(builder: (_) {
-                          final entry = _entryFor(p.horseNo);
-                          if (entry == null) return const SizedBox.shrink();
-                          return Column(
-                            children: [
-                              _miniStat(
-                                '레이팅',
-                                entry.rating.toStringAsFixed(0),
-                                Colors.cyanAccent,
-                              ),
-                              const SizedBox(height: 3),
-                              _miniStat(
-                                entry.winCount > 0 ? '승률' : '입상률',
-                                entry.totalRaces > 0
-                                    ? entry.winCount > 0
-                                        ? '${entry.winRate.toStringAsFixed(1)}%'
-                                        : '${entry.placeRate.toStringAsFixed(1)}%'
-                                    : '-',
-                                AppTheme.positiveGreen,
-                              ),
-                            ],
-                          );
-                        }),
+                        Builder(
+                          builder: (_) {
+                            final entry = _entryFor(p.horseNo);
+                            if (entry == null) return const SizedBox.shrink();
+                            return Column(
+                              children: [
+                                _miniStat(
+                                  '레이팅',
+                                  entry.rating.toStringAsFixed(0),
+                                  Colors.cyanAccent,
+                                ),
+                                const SizedBox(height: 3),
+                                _miniStat(
+                                  entry.winCount > 0 ? '승률' : '입상률',
+                                  entry.totalRaces > 0
+                                      ? entry.winCount > 0
+                                            ? '${entry.winRate.toStringAsFixed(1)}%'
+                                            : '${entry.placeRate.toStringAsFixed(1)}%'
+                                      : '-',
+                                  AppTheme.positiveGreen,
+                                ),
+                              ],
+                            );
+                          },
+                        ),
                       ],
                     ),
                   ),
@@ -1625,10 +1761,13 @@ class _HorseCard extends StatelessWidget {
                             // 성별·연령
                             Container(
                               padding: const EdgeInsets.symmetric(
-                                  horizontal: 6, vertical: 2),
+                                horizontal: 6,
+                                vertical: 2,
+                              ),
                               decoration: BoxDecoration(
-                                color: _sexColor(entry.sexLabel)
-                                    .withValues(alpha: 0.15),
+                                color: _sexColor(
+                                  entry.sexLabel,
+                                ).withValues(alpha: 0.15),
                                 borderRadius: BorderRadius.circular(4),
                               ),
                               child: Text(
@@ -1642,8 +1781,11 @@ class _HorseCard extends StatelessWidget {
                             ),
                             const SizedBox(width: 6),
                             // 기수
-                            Icon(Icons.person, size: 13,
-                                color: Colors.blueAccent.shade100),
+                            Icon(
+                              Icons.person,
+                              size: 13,
+                              color: Colors.blueAccent.shade100,
+                            ),
                             const SizedBox(width: 3),
                             Flexible(
                               child: Text(
@@ -1660,10 +1802,13 @@ class _HorseCard extends StatelessWidget {
                               ),
                             ),
                             if (entry.trainerName.isNotEmpty) ...[
-                              Text('  •  ',
-                                  style: TextStyle(
-                                      fontSize: 12,
-                                      color: Colors.grey.shade600)),
+                              Text(
+                                '  •  ',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.grey.shade600,
+                                ),
+                              ),
                               Flexible(
                                 child: Text(
                                   entry.trainerName,
@@ -1688,8 +1833,10 @@ class _HorseCard extends StatelessWidget {
 
               // ── 2행: 핵심 5개 스탯 (마번, 레이팅, 승률, 배당, AI예측) ──
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 8,
+                  vertical: 10,
+                ),
                 decoration: BoxDecoration(
                   color: Colors.white.withValues(alpha: 0.04),
                   borderRadius: BorderRadius.circular(10),
@@ -1716,8 +1863,8 @@ class _HorseCard extends StatelessWidget {
                       label: entry.winCount > 0 ? '승률' : '입상률',
                       value: entry.totalRaces > 0
                           ? entry.winCount > 0
-                              ? '${entry.winRate.toStringAsFixed(1)}%'
-                              : '${entry.placeRate.toStringAsFixed(1)}%'
+                                ? '${entry.winRate.toStringAsFixed(1)}%'
+                                : '${entry.placeRate.toStringAsFixed(1)}%'
                           : '-',
                       color: AppTheme.positiveGreen,
                     ),
@@ -1726,10 +1873,9 @@ class _HorseCard extends StatelessWidget {
                       label: winOdds > 0 ? '배당' : '예상배당',
                       value: winOdds > 0
                           ? '${winOdds.toStringAsFixed(1)}배'
-                          : prediction != null &&
-                                  prediction!.winProbability > 0
-                              ? '${(100 / prediction!.winProbability).toStringAsFixed(1)}배'
-                              : '-',
+                          : prediction != null && prediction!.winProbability > 0
+                          ? '${(100 / prediction!.winProbability).toStringAsFixed(1)}배'
+                          : '-',
                       color: AppTheme.accentGold,
                     ),
                   ],
@@ -1774,11 +1920,11 @@ class _HorseCard extends StatelessWidget {
   }
 
   Widget _statDivider() => Container(
-        width: 1,
-        height: 28,
-        margin: const EdgeInsets.symmetric(horizontal: 2),
-        color: Colors.grey.shade700.withValues(alpha: 0.5),
-      );
+    width: 1,
+    height: 28,
+    margin: const EdgeInsets.symmetric(horizontal: 2),
+    color: Colors.grey.shade700.withValues(alpha: 0.5),
+  );
 
   static Color _sexColor(String sex) {
     switch (sex) {
@@ -1951,4 +2097,3 @@ class _MiniChip extends StatelessWidget {
     );
   }
 }
-

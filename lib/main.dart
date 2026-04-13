@@ -7,16 +7,19 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'core/constants/supabase_constants.dart';
 import 'core/theme/app_theme.dart';
+import 'features/purchase/providers/in_app_purchase_provider.dart';
 import 'router/app_router.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
-    statusBarColor: Colors.transparent,
-    systemNavigationBarColor: Colors.transparent,
-    systemNavigationBarDividerColor: Colors.transparent,
-  ));
+  SystemChrome.setSystemUIOverlayStyle(
+    const SystemUiOverlayStyle(
+      statusBarColor: Colors.transparent,
+      systemNavigationBarColor: Colors.transparent,
+      systemNavigationBarDividerColor: Colors.transparent,
+    ),
+  );
   SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
 
   await initializeDateFormatting('ko');
@@ -29,11 +32,13 @@ void main() async {
   runApp(const ProviderScope(child: HorseRacingApp()));
 }
 
-class HorseRacingApp extends StatelessWidget {
+class HorseRacingApp extends ConsumerWidget {
   const HorseRacingApp({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    ref.watch(inAppPurchaseProvider);
+
     return MaterialApp.router(
       title: '경마 Plus',
       debugShowCheckedModeBanner: false,

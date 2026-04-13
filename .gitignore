@@ -48,3 +48,4 @@ app.*.map.json
 backend/.env
 *.jks
 *.keystore
+assets/config/runtime_secrets.json
