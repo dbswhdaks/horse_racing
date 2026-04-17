@@ -80,14 +80,22 @@ class RaceEntryScreen extends ConsumerWidget {
                   loading: () => const ShimmerLoading(height: 78),
                   error: (_, __) => RaceVideoPanel(
                     links: RaceVideoLinks(
-                      liveUrl:
-                          '${ApiConstants.todayRaceBaseUrl}${ApiConstants.todayRaceScorePath}',
+                      liveUrl: _buildRaceVideoUrl(),
                       paradeUrl: ApiConstants.todayRaceParadeVideoUrl,
                       hasVideoSection: false,
                       isRaceVideoFromApi: false,
                     ),
+                    showParadeButton: false,
                   ),
-                  data: (links) => RaceVideoPanel(links: links),
+                  data: (links) => RaceVideoPanel(
+                    links: RaceVideoLinks(
+                      liveUrl: _buildRaceVideoUrl(),
+                      paradeUrl: links.paradeUrl,
+                      hasVideoSection: links.hasVideoSection,
+                      isRaceVideoFromApi: links.isRaceVideoFromApi,
+                    ),
+                    showParadeButton: false,
+                  ),
                 ),
               ),
             ),
@@ -360,6 +368,15 @@ class RaceEntryScreen extends ConsumerWidget {
       if (sorted[i].horseNo == horseNo) return i + 1;
     }
     return 0;
+  }
+
+  String _buildRaceVideoUrl() {
+    return Uri.https('kraplayer.starplayer.net', '/kra/vod/starplayer.php', {
+      'meet': meet,
+      'rcdate': date,
+      'rcno': raceNo.toString(),
+      'vod_type': 'r',
+    }).toString();
   }
 }
 

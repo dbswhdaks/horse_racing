@@ -1,13 +1,18 @@
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
 
+import '../../../core/widgets/in_app_webview_screen.dart';
 import '../../../core/services/kra_video_service.dart';
 import '../../../core/theme/app_theme.dart';
 
 class RaceVideoPanel extends StatelessWidget {
-  const RaceVideoPanel({super.key, required this.links});
+  const RaceVideoPanel({
+    super.key,
+    required this.links,
+    this.showParadeButton = true,
+  });
 
   final RaceVideoLinks links;
+  final bool showParadeButton;
 
   @override
   Widget build(BuildContext context) {
@@ -45,14 +50,16 @@ class RaceVideoPanel extends StatelessWidget {
           const SizedBox(height: 10),
           Row(
             children: [
-              Expanded(
-                child: _VideoActionButton(
-                  icon: Icons.directions_run_rounded,
-                  label: '경주로 입장',
-                  onTap: () => _openExternal(context, links.paradeUrl),
+              if (showParadeButton) ...[
+                Expanded(
+                  child: _VideoActionButton(
+                    icon: Icons.directions_run_rounded,
+                    label: '경주로 입장',
+                    onTap: () => _openExternal(context, links.paradeUrl),
+                  ),
                 ),
-              ),
-              const SizedBox(width: 8),
+                const SizedBox(width: 8),
+              ],
               Expanded(
                 child: _VideoActionButton(
                   icon: Icons.play_circle_fill_rounded,
@@ -82,10 +89,12 @@ class RaceVideoPanel extends StatelessWidget {
       _showError(context, '링크 형식이 올바르지 않습니다.');
       return;
     }
-    final success = await launchUrl(uri, mode: LaunchMode.externalApplication);
-    if (!success && context.mounted) {
-      _showError(context, '영상을 열 수 없습니다. 잠시 후 다시 시도해주세요.');
-    }
+    if (!context.mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => InAppWebViewScreen(url: uri.toString(), title: '경주 영상'),
+      ),
+    );
   }
 
   void _showError(BuildContext context, String message) {

@@ -35,6 +35,18 @@ final selectedDateProvider = StateProvider<DateTime>((ref) => DateTime.now());
 
 String formatDateParam(DateTime date) => DateFormat('yyyyMMdd').format(date);
 
+Future<T> _withTimeout<T>(
+  Future<T> future,
+  Duration timeout,
+  T fallback,
+) async {
+  try {
+    return await future.timeout(timeout);
+  } catch (_) {
+    return fallback;
+  }
+}
+
 // ── Races: Supabase first → KRA API fallback ──
 
 final racePlanProvider =
@@ -43,16 +55,19 @@ final racePlanProvider =
       params,
     ) async {
       final supa = ref.read(supabaseServiceProvider);
-      try {
-        final races = await supa.getRaces(
-          meet: params.meet,
-          raceDate: params.date,
-        );
-        if (races.isNotEmpty) return races;
-      } catch (_) {}
+      final races = await _withTimeout<List<Race>>(
+        supa.getRaces(meet: params.meet, raceDate: params.date),
+        const Duration(seconds: 2),
+        const [],
+      );
+      if (races.isNotEmpty) return races;
 
       final kra = ref.read(kraApiServiceProvider);
-      return kra.getRacePlan(meet: params.meet, rcDate: params.date);
+      return _withTimeout<List<Race>>(
+        kra.getRacePlan(meet: params.meet, rcDate: params.date),
+        const Duration(seconds: 5),
+        const [],
+      );
     });
 
 // ── Entries: Supabase first → KRA API fallback ──
@@ -63,36 +78,42 @@ final raceStartListProvider =
       ({String meet, String? date, int? raceNo})
     >((ref, params) async {
       final supa = ref.read(supabaseServiceProvider);
-      try {
-        final entries = await supa.getEntries(
+      final entries = await _withTimeout<List<RaceEntry>>(
+        supa.getEntries(
           meet: params.meet,
           raceDate: params.date,
           raceNo: params.raceNo,
-        );
-        if (entries.isNotEmpty) {
-          debugPrint(
-            '[ENTRIES] Supabase에서 ${entries.length}건 로드 '
-            '(첫 항목: ${entries.first.horseNo}번 ${entries.first.horseName} '
-            '기수=${entries.first.jockeyName})',
-          );
-          return entries;
-        }
-      } catch (_) {}
-
-      final kra = ref.read(kraApiServiceProvider);
-      final entries = await kra.getRaceStartList(
-        meet: params.meet,
-        rcDate: params.date,
-        rcNo: params.raceNo,
+        ),
+        const Duration(seconds: 3),
+        const [],
       );
       if (entries.isNotEmpty) {
         debugPrint(
-          '[ENTRIES] KRA API에서 ${entries.length}건 로드 '
+          '[ENTRIES] Supabase에서 ${entries.length}건 로드 '
           '(첫 항목: ${entries.first.horseNo}번 ${entries.first.horseName} '
           '기수=${entries.first.jockeyName})',
         );
+        return entries;
       }
-      return entries;
+
+      final kra = ref.read(kraApiServiceProvider);
+      final kraEntries = await _withTimeout<List<RaceEntry>>(
+        kra.getRaceStartList(
+          meet: params.meet,
+          rcDate: params.date,
+          rcNo: params.raceNo,
+        ),
+        const Duration(seconds: 6),
+        const [],
+      );
+      if (kraEntries.isNotEmpty) {
+        debugPrint(
+          '[ENTRIES] KRA API에서 ${kraEntries.length}건 로드 '
+          '(첫 항목: ${kraEntries.first.horseNo}번 ${kraEntries.first.horseName} '
+          '기수=${kraEntries.first.jockeyName})',
+        );
+      }
+      return kraEntries;
     });
 
 // ── 경주별 두수: 날짜 전체 출전표에서 경주별 카운트 ──
@@ -202,20 +223,26 @@ final oddsProvider =
       ({String meet, String? date, int? raceNo})
     >((ref, params) async {
       final supa = ref.read(supabaseServiceProvider);
-      try {
-        final odds = await supa.getOdds(
+      final odds = await _withTimeout<List<Odds>>(
+        supa.getOdds(
           meet: params.meet,
           raceDate: params.date,
           raceNo: params.raceNo,
-        );
-        if (odds.isNotEmpty) return odds;
-      } catch (_) {}
+        ),
+        const Duration(seconds: 3),
+        const [],
+      );
+      if (odds.isNotEmpty) return odds;
 
       final kra = ref.read(kraApiServiceProvider);
-      return kra.getOddInfo(
-        meet: params.meet,
-        rcDate: params.date,
-        rcNo: params.raceNo,
+      return _withTimeout<List<Odds>>(
+        kra.getOddInfo(
+          meet: params.meet,
+          rcDate: params.date,
+          rcNo: params.raceNo,
+        ),
+        const Duration(seconds: 6),
+        const [],
       );
     });
 

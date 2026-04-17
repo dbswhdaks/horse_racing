@@ -18,21 +18,14 @@ class RaceVideoLinks {
 }
 
 class KraVideoService {
-  final Dio _dio = Dio(
-    BaseOptions(
-      baseUrl: ApiConstants.todayRaceBaseUrl,
-      connectTimeout: const Duration(seconds: 15),
-      receiveTimeout: const Duration(seconds: 20),
-      responseType: ResponseType.plain,
-    ),
-  );
   final Dio _youtubeDio = Dio(
     BaseOptions(
       baseUrl: ApiConstants.youtubeApiBaseUrl,
-      connectTimeout: const Duration(seconds: 8),
-      receiveTimeout: const Duration(seconds: 10),
+      connectTimeout: const Duration(seconds: 3),
+      receiveTimeout: const Duration(seconds: 4),
     ),
   );
+  static final Map<String, RaceVideoLinks> _cache = {};
   static String? _cachedYoutubeChannelId;
 
   Future<RaceVideoLinks> getRaceVideoLinks({
@@ -40,14 +33,9 @@ class KraVideoService {
     required String date,
     required int raceNo,
   }) async {
-    final query = <String, String>{
-      'rcDate': date,
-      'rcNo': raceNo.toString(),
-      // todayrace 페이지는 서버 사이드 렌더링이라 파라미터 인식 방식이 변경될 수 있어
-      // 숫자 코드와 이름 코드를 함께 전달합니다.
-      'meet': meet,
-      'rcMeet': _mapMeetToSiteCode(meet),
-    };
+    final cacheKey = '$meet-$date-$raceNo';
+    final cached = _cache[cacheKey];
+    if (cached != null) return cached;
 
     final fallbackRaceVideo = _buildYoutubeSearchUrl(
       keyword: '${_meetName(meet)} ${raceNo}R ${_formatDateHyphen(date)} 경주영상',
@@ -57,48 +45,19 @@ class KraVideoService {
           '${_meetName(meet)} ${raceNo}R ${_formatDateHyphen(date)} 경주로 입장',
     );
 
-    try {
-      final youtubeVideoUrl = await _fetchYoutubeRaceVideoUrl(
-        meet: meet,
-        date: date,
-        raceNo: raceNo,
-      );
-      final response = await _dio.get(
-        ApiConstants.todayRaceScorePath,
-        queryParameters: query,
-      );
-      final html = response.data?.toString() ?? '';
-      final hasRaceTitle = html.contains('제 $raceNo경주');
-      final hasVideoText = html.contains('경주영상');
-
-      return RaceVideoLinks(
-        // 사용자 요청: 경주영상은 유튜브 연결
-        liveUrl: youtubeVideoUrl ?? fallbackRaceVideo,
-        paradeUrl: paradeVideo,
-        hasVideoSection: hasRaceTitle && hasVideoText,
-        isRaceVideoFromApi: youtubeVideoUrl != null,
-      );
-    } catch (_) {
-      // 요청 실패 시에도 사용자가 바로 볼 수 있도록 영상 페이지 링크는 반환합니다.
-      final youtubeVideoUrl = await _fetchYoutubeRaceVideoUrl(
-        meet: meet,
-        date: date,
-        raceNo: raceNo,
-      );
-      return RaceVideoLinks(
-        liveUrl:
-            youtubeVideoUrl ??
-            (fallbackRaceVideo.isNotEmpty
-                ? fallbackRaceVideo
-                : _buildYoutubeSearchUrl(
-                    keyword:
-                        '${_meetName(meet)} ${raceNo}R ${_formatDateHyphen(date)} 경주영상',
-                  )),
-        paradeUrl: paradeVideo,
-        hasVideoSection: false,
-        isRaceVideoFromApi: youtubeVideoUrl != null,
-      );
-    }
+    final youtubeVideoUrl = await _fetchYoutubeRaceVideoUrl(
+      meet: meet,
+      date: date,
+      raceNo: raceNo,
+    );
+    final links = RaceVideoLinks(
+      liveUrl: youtubeVideoUrl ?? fallbackRaceVideo,
+      paradeUrl: paradeVideo,
+      hasVideoSection: false,
+      isRaceVideoFromApi: youtubeVideoUrl != null,
+    );
+    _cache[cacheKey] = links;
+    return links;
   }
 
   Future<String?> _fetchYoutubeRaceVideoUrl({
@@ -165,6 +124,7 @@ class KraVideoService {
   }
 
   Future<String?> _resolveYoutubeChannelId(String apiKey) async {
+    if (_cachedYoutubeChannelId == '') return null;
     if (_cachedYoutubeChannelId != null) return _cachedYoutubeChannelId;
 
     try {
@@ -188,6 +148,7 @@ class KraVideoService {
       _cachedYoutubeChannelId = channelId;
       return channelId;
     } catch (_) {
+      _cachedYoutubeChannelId = '';
       return null;
     }
   }
@@ -208,19 +169,6 @@ class KraVideoService {
     if (title.contains(formattedDate)) score += 3;
     if (title.contains('경주')) score += 1;
     return score;
-  }
-
-  String _mapMeetToSiteCode(String meet) {
-    switch (meet) {
-      case '1':
-        return 'S';
-      case '2':
-        return 'J';
-      case '3':
-        return 'B';
-      default:
-        return meet;
-    }
   }
 
   String _meetName(String meet) {

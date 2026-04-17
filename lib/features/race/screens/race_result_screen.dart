@@ -2,10 +2,10 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/constants/api_constants.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/widgets/in_app_webview_screen.dart';
 import '../../../core/widgets/shimmer_loading.dart';
 import '../../../models/race_result.dart';
 import '../../../models/prediction.dart';
@@ -229,14 +229,12 @@ class RaceResultScreen extends ConsumerWidget {
     final links = await ref.read(
       raceVideoLinksProvider((meet: meet, date: date, raceNo: raceNo)).future,
     );
-    final uri = Uri.parse(links.liveUrl);
-
-    final success = await launchUrl(uri, mode: LaunchMode.externalApplication);
-    if (!success && context.mounted) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('경주영상을 열 수 없습니다.')));
-    }
+    if (!context.mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => InAppWebViewScreen(url: links.liveUrl, title: '경주 영상'),
+      ),
+    );
   }
 }
 

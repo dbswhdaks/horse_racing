@@ -2,7 +2,7 @@
 name: horse_racing
 description: "경마 예측 앱 - 한국마사회 공공데이터 기반"
 publish_to: 'none' # pub.dev에 배포하지 않음 (비공개 앱)
-version: 1.0.10+10  # 버전명+빌드번호
+version: 1.0.12+12  # 버전명+빌드번호
 
 # Flutter SDK 버전 제약
 environment:
@@ -28,6 +28,7 @@ dependencies:
   share_plus: ^12.0.1           # 외부 공유 기능
   in_app_purchase: ^3.2.3
   url_launcher: ^6.3.2
+  webview_flutter: ^4.13.1
 
 # 개발 전용 의존성 (빌드·테스트·코드생성)
 dev_dependencies:

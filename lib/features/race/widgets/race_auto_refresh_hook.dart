@@ -65,13 +65,6 @@ class _RaceAutoRefreshHookState extends ConsumerState<RaceAutoRefreshHook> {
         raceNo: widget.raceNo,
       )),
     );
-    ref.invalidate(
-      raceVideoLinksProvider((
-        meet: widget.meet,
-        date: widget.date,
-        raceNo: widget.raceNo,
-      )),
-    );
   }
 
   bool _shouldAutoRefreshNow() {

@@ -399,7 +399,7 @@ class _EmptyView extends StatelessWidget {
             Icon(Icons.event_busy, size: 48, color: Colors.grey.shade700),
             const SizedBox(height: 16),
             Text(
-              '오늘은 $meetLabel경주가 없는 날 입니다.',
+              '선택한 날짜에는 $meetLabel 경주가 없습니다.',
               style: TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.w600,
