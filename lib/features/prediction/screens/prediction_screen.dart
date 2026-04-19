@@ -36,29 +36,95 @@ class PredictionScreen extends ConsumerWidget {
               title: Text('AI 예측 - $meetName ${raceNo}R'),
             ),
             predAsync.when(
-              loading: () => SliverFillRemaining(
-                child: ShimmerCardList(cardHeight: 80),
-              ),
-              error: (err, _) => SliverFillRemaining(
-                child: _OfflineView(),
-              ),
+              loading: () =>
+                  SliverFillRemaining(child: ShimmerCardList(cardHeight: 80)),
+              error: (err, _) => SliverFillRemaining(child: _OfflineView()),
               data: (report) {
                 if (report == null) {
                   return SliverFillRemaining(child: _OfflineView());
                 }
-                return SliverList(
-                  delegate: SliverChildListDelegate([
-                    _ModelInfoCard(report: report),
-                    const _SectionTitle('우승 확률'),
-                    _WinProbabilityChart(predictions: report.predictions),
-                    const _SectionTitle('복승 확률'),
-                    _PlaceProbabilityChart(predictions: report.predictions),
-                    const _SectionTitle('상세 분석'),
-                    ...report.predictions.map(
-                      (p) => _PredictionDetailCard(prediction: p),
+                final sorted = [
+                  ...report.predictions,
+                ]..sort((a, b) => b.winProbability.compareTo(a.winProbability));
+                final top3 = sorted.take(3).toList();
+
+                return SliverFillRemaining(
+                  hasScrollBody: true,
+                  child: DefaultTabController(
+                    length: 2,
+                    child: Column(
+                      children: [
+                        Container(
+                          decoration: BoxDecoration(
+                            border: Border(
+                              bottom: BorderSide(
+                                color: Colors.white.withValues(alpha: 0.24),
+                              ),
+                            ),
+                          ),
+                          child: const TabBar(
+                            labelColor: Color(0xFF00C853),
+                            unselectedLabelColor: Color(0xFF9AA1AB),
+                            indicatorSize: TabBarIndicatorSize.label,
+                            indicator: UnderlineTabIndicator(
+                              borderSide: BorderSide(
+                                color: Color(0xFF00C853),
+                                width: 3,
+                              ),
+                            ),
+                            labelStyle: TextStyle(
+                              fontSize: 17,
+                              fontWeight: FontWeight.w900,
+                            ),
+                            unselectedLabelStyle: TextStyle(
+                              fontSize: 17,
+                              fontWeight: FontWeight.w700,
+                            ),
+                            tabs: [
+                              Tab(text: '종합추천'),
+                              Tab(text: 'AI 추천'),
+                            ],
+                          ),
+                        ),
+                        Expanded(
+                          child: TabBarView(
+                            children: [
+                              ListView(
+                                children: [
+                                  _ModelInfoCard(report: report),
+                                  const _SectionTitle('우승 확률'),
+                                  _WinProbabilityChart(
+                                    predictions: report.predictions,
+                                  ),
+                                  const _SectionTitle('복승 확률'),
+                                  _PlaceProbabilityChart(
+                                    predictions: report.predictions,
+                                  ),
+                                  if (top3.isNotEmpty) ...[
+                                    const _SectionTitle('종합 추천 TOP 3'),
+                                    ...top3.map(
+                                      (p) =>
+                                          _PredictionDetailCard(prediction: p),
+                                    ),
+                                  ],
+                                  const SizedBox(height: 24),
+                                ],
+                              ),
+                              ListView(
+                                children: [
+                                  const _SectionTitle('AI 상세 분석'),
+                                  ...sorted.map(
+                                    (p) => _PredictionDetailCard(prediction: p),
+                                  ),
+                                  const SizedBox(height: 24),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 32),
-                  ]),
+                  ),
                 );
               },
             ),
@@ -132,14 +198,15 @@ class _ModelInfoCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.deepPurple.shade900.withValues(alpha: 0.3),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: Colors.deepPurple.withValues(alpha: 0.3),
-        ),
+        border: Border.all(color: Colors.deepPurple.withValues(alpha: 0.3)),
       ),
       child: Row(
         children: [
-          Icon(Icons.auto_awesome,
-              color: Colors.purpleAccent.shade100, size: 24),
+          Icon(
+            Icons.auto_awesome,
+            color: Colors.purpleAccent.shade100,
+            size: 24,
+          ),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
@@ -152,8 +219,7 @@ class _ModelInfoCard extends StatelessWidget {
                 const SizedBox(height: 2),
                 Text(
                   '모델 v${report.modelVersion} | ${report.predictions.length}두 분석',
-                  style:
-                      TextStyle(fontSize: 12, color: Colors.grey.shade400),
+                  style: TextStyle(fontSize: 12, color: Colors.grey.shade400),
                 ),
               ],
             ),
@@ -214,16 +280,16 @@ class _WinProbabilityChart extends StatelessWidget {
           gridData: FlGridData(
             drawVerticalLine: false,
             horizontalInterval: 10,
-            getDrawingHorizontalLine: (v) => FlLine(
-              color: Colors.grey.shade800,
-              strokeWidth: 0.5,
-            ),
+            getDrawingHorizontalLine: (v) =>
+                FlLine(color: Colors.grey.shade800, strokeWidth: 0.5),
           ),
           titlesData: FlTitlesData(
-            topTitles:
-                const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-            rightTitles:
-                const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+            topTitles: const AxisTitles(
+              sideTitles: SideTitles(showTitles: false),
+            ),
+            rightTitles: const AxisTitles(
+              sideTitles: SideTitles(showTitles: false),
+            ),
             bottomTitles: AxisTitles(
               sideTitles: SideTitles(
                 showTitles: true,
@@ -237,7 +303,9 @@ class _WinProbabilityChart extends StatelessWidget {
                     child: Text(
                       '${sorted[idx].horseNo}번',
                       style: TextStyle(
-                          fontSize: 11, color: Colors.grey.shade400),
+                        fontSize: 11,
+                        color: Colors.grey.shade400,
+                      ),
                     ),
                   );
                 },
@@ -250,8 +318,7 @@ class _WinProbabilityChart extends StatelessWidget {
                 interval: 10,
                 getTitlesWidget: (v, meta) => Text(
                   '${v.toInt()}%',
-                  style:
-                      TextStyle(fontSize: 10, color: Colors.grey.shade500),
+                  style: TextStyle(fontSize: 10, color: Colors.grey.shade500),
                 ),
               ),
             ),
@@ -324,16 +391,16 @@ class _PlaceProbabilityChart extends StatelessWidget {
           gridData: FlGridData(
             drawVerticalLine: false,
             horizontalInterval: 10,
-            getDrawingHorizontalLine: (v) => FlLine(
-              color: Colors.grey.shade800,
-              strokeWidth: 0.5,
-            ),
+            getDrawingHorizontalLine: (v) =>
+                FlLine(color: Colors.grey.shade800, strokeWidth: 0.5),
           ),
           titlesData: FlTitlesData(
-            topTitles:
-                const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-            rightTitles:
-                const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+            topTitles: const AxisTitles(
+              sideTitles: SideTitles(showTitles: false),
+            ),
+            rightTitles: const AxisTitles(
+              sideTitles: SideTitles(showTitles: false),
+            ),
             bottomTitles: AxisTitles(
               sideTitles: SideTitles(
                 showTitles: true,
@@ -347,7 +414,9 @@ class _PlaceProbabilityChart extends StatelessWidget {
                     child: Text(
                       '${sorted[idx].horseNo}번',
                       style: TextStyle(
-                          fontSize: 11, color: Colors.grey.shade400),
+                        fontSize: 11,
+                        color: Colors.grey.shade400,
+                      ),
                     ),
                   );
                 },
@@ -360,8 +429,7 @@ class _PlaceProbabilityChart extends StatelessWidget {
                 interval: 10,
                 getTitlesWidget: (v, meta) => Text(
                   '${v.toInt()}%',
-                  style:
-                      TextStyle(fontSize: 10, color: Colors.grey.shade500),
+                  style: TextStyle(fontSize: 10, color: Colors.grey.shade500),
                 ),
               ),
             ),
@@ -473,7 +541,9 @@ class _PredictionDetailCard extends StatelessWidget {
                 children: prediction.tags.map((tag) {
                   return Container(
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 8, vertical: 3),
+                      horizontal: 8,
+                      vertical: 3,
+                    ),
                     decoration: BoxDecoration(
                       color: Colors.grey.shade800,
                       borderRadius: BorderRadius.circular(12),
@@ -501,7 +571,9 @@ class _PredictionDetailCard extends StatelessWidget {
                         child: Text(
                           e.key,
                           style: TextStyle(
-                              fontSize: 11, color: Colors.grey.shade500),
+                            fontSize: 11,
+                            color: Colors.grey.shade500,
+                          ),
                         ),
                       ),
                       Expanded(
@@ -521,7 +593,9 @@ class _PredictionDetailCard extends StatelessWidget {
                       Text(
                         '${(e.value * 100).toStringAsFixed(0)}%',
                         style: TextStyle(
-                            fontSize: 11, color: Colors.grey.shade400),
+                          fontSize: 11,
+                          color: Colors.grey.shade400,
+                        ),
                       ),
                     ],
                   ),

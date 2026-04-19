@@ -1,7 +1,7 @@
-import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/constants/api_constants.dart';
 import '../../../core/theme/app_theme.dart';
@@ -144,14 +144,15 @@ class RaceResultScreen extends ConsumerWidget {
                     if (podium.isNotEmpty)
                       _PodiumSection(
                         results: podium,
-                        onVideoTap: () => _openRaceVideo(context, ref),
+                        onVideoTap: () => _openRaceVideo(context),
                       ),
 
-                    // AI 예측 비교
+                    // AI 예측 비교 + 종합추천
                     if (predictions.isNotEmpty)
                       _AiComparisonSection(
                         results: sorted,
                         predictions: predictions,
+                        raceKey: '${meet}_${date}_$raceNo',
                       ),
 
                     // 승식별 결과
@@ -225,14 +226,16 @@ class RaceResultScreen extends ConsumerWidget {
     return null;
   }
 
-  Future<void> _openRaceVideo(BuildContext context, WidgetRef ref) async {
-    final links = await ref.read(
-      raceVideoLinksProvider((meet: meet, date: date, raceNo: raceNo)).future,
-    );
-    if (!context.mounted) return;
-    await Navigator.of(context).push(
+  void _openRaceVideo(BuildContext context) {
+    const vodMeetMap = {'1': '1', '2': '3', '3': '2'};
+    final vodMeet = vodMeetMap[meet] ?? meet;
+    final url =
+        'https://kraplayer.starplayer.net/kra/vod/starplayer.php'
+        '?meet=$vodMeet&rcdate=$date&rcno=$raceNo&vod_type=r';
+
+    Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => InAppWebViewScreen(url: links.liveUrl, title: '경주 영상'),
+        builder: (_) => InAppWebViewScreen(url: url, title: '경주 영상'),
       ),
     );
   }
@@ -437,42 +440,100 @@ class _PodiumCard extends StatelessWidget {
 // AI 예측 비교 섹션
 // ═══════════════════════════════════════════════════
 
-class _AiComparisonSection extends StatelessWidget {
+class _AiComparisonSection extends StatefulWidget {
   final List<RaceResult> results;
   final List<Prediction> predictions;
+  final String raceKey;
 
   const _AiComparisonSection({
     required this.results,
     required this.predictions,
+    required this.raceKey,
   });
 
   @override
-  Widget build(BuildContext context) {
-    final sorted = [...predictions]
-      ..sort((a, b) => b.winProbability.compareTo(a.winProbability));
-    if (sorted.isEmpty || results.isEmpty) return const SizedBox.shrink();
+  State<_AiComparisonSection> createState() => _AiComparisonSectionState();
+}
 
-    final top3pred = sorted.take(3).toList();
-    final actualTop3 = results
+class _AiComparisonSectionState extends State<_AiComparisonSection> {
+  List<int?> _userPicks = List.filled(5, null);
+  List<int?> _compPicks = List.filled(5, null);
+
+  @override
+  void initState() {
+    super.initState();
+    _loadData();
+  }
+
+  Future<void> _loadData() async {
+    final prefs = await SharedPreferences.getInstance();
+
+    final userSaved = prefs.getStringList('picks_${widget.raceKey}');
+    if (userSaved != null) {
+      final loaded = List<int?>.filled(5, null);
+      for (var i = 0; i < userSaved.length && i < 5; i++) {
+        loaded[i] = int.tryParse(userSaved[i]);
+      }
+      _userPicks = loaded;
+    }
+
+    final compSaved = prefs.getStringList('comp_${widget.raceKey}');
+    if (compSaved != null) {
+      final loaded = List<int?>.filled(5, null);
+      for (var i = 0; i < compSaved.length && i < 5; i++) {
+        loaded[i] = int.tryParse(compSaved[i]);
+      }
+      _compPicks = loaded;
+    }
+
+    if (mounted) setState(() {});
+  }
+
+  int _countHits(List<int> picks, List<RaceResult> actual) {
+    int hits = 0;
+    for (final no in picks) {
+      if (actual.any((r) => r.horseNo == no)) hits++;
+    }
+    return hits;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final sorted = [...widget.predictions]
+      ..sort((a, b) => b.winProbability.compareTo(a.winProbability));
+    if (sorted.isEmpty || widget.results.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    final actualTop3 = widget.results
         .where((r) => r.rank >= 1 && r.rank <= 3)
         .take(3)
         .toList();
 
-    int hits = 0;
-    for (final pred in top3pred) {
-      if (actualTop3.any((r) => r.horseNo == pred.horseNo)) hits++;
-    }
+    final top3pred = sorted.take(3).toList();
+    final aiHits = _countHits(
+      top3pred.map((p) => p.horseNo).toList(),
+      actualTop3,
+    );
+    final compTop3 = _compPicks.take(3).whereType<int>().toList();
+    final compHits = _countHits(compTop3, actualTop3);
+    final userTop3 = _userPicks.take(3).whereType<int>().toList();
+    final userHits = _countHits(userTop3, actualTop3);
 
-    final accuracy = top3pred.isNotEmpty ? (hits / top3pred.length * 100) : 0.0;
-    final accuracyColor = accuracy >= 66
+    double pct(int hits, int total) => total > 0 ? hits / total * 100 : 0;
+    final aiAcc = pct(aiHits, top3pred.length);
+    final compAcc = pct(compHits, compTop3.length);
+    final userAcc = pct(userHits, userTop3.length);
+
+    Color accColor(double v) => v >= 66
         ? AppTheme.positiveGreen
-        : accuracy >= 33
+        : v >= 33
         ? AppTheme.accentGold
         : AppTheme.negativeRed;
 
     return Container(
       margin: const EdgeInsets.fromLTRB(12, 8, 12, 4),
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: [
@@ -488,7 +549,6 @@ class _AiComparisonSection extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 헤더
           Row(
             children: [
               Icon(
@@ -497,59 +557,87 @@ class _AiComparisonSection extends StatelessWidget {
                 color: Colors.purpleAccent.shade100,
               ),
               const SizedBox(width: 8),
-              const Text(
-                'AI 예측 vs 실제 결과',
-                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800),
-              ),
-              const Spacer(),
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 4,
-                ),
-                decoration: BoxDecoration(
-                  color: accuracyColor.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(
-                    color: accuracyColor.withValues(alpha: 0.3),
-                  ),
-                ),
+              const Expanded(
                 child: Text(
-                  '적중률 ${accuracy.toStringAsFixed(0)}%',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w800,
-                    color: accuracyColor,
-                  ),
+                  '예측 비교',
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800),
                 ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+
+          // 적중률 배지
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              _AccuracyBadge(
+                label: 'AI',
+                accuracy: aiAcc,
+                color: accColor(aiAcc),
+                icon: Icons.auto_awesome,
+              ),
+              _AccuracyBadge(
+                label: '종합',
+                accuracy: compAcc,
+                color: accColor(compAcc),
+                icon: Icons.recommend,
+              ),
+              _AccuracyBadge(
+                label: '선택',
+                accuracy: userAcc,
+                color: accColor(userAcc),
+                icon: Icons.person,
               ),
             ],
           ),
           const SizedBox(height: 14),
 
-          // 비교 테이블
+          // 열 헤더
           Row(
             children: [
-              const SizedBox(width: 40),
+              const SizedBox(width: 28),
               Expanded(
                 child: Text(
-                  'AI 예측',
+                  'AI',
                   textAlign: TextAlign.center,
                   style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
                     color: Colors.purpleAccent.shade100,
                   ),
                 ),
               ),
-              const SizedBox(width: 30),
               Expanded(
                 child: Text(
-                  '실제 결과',
+                  '종합',
                   textAlign: TextAlign.center,
                   style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                    color: Colors.amber,
+                  ),
+                ),
+              ),
+              Expanded(
+                child: Text(
+                  '선택',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                    color: const Color(0xFF00C853),
+                  ),
+                ),
+              ),
+              Expanded(
+                child: Text(
+                  '결과',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
                     color: AppTheme.winColor,
                   ),
                 ),
@@ -558,16 +646,55 @@ class _AiComparisonSection extends StatelessWidget {
           ),
           const SizedBox(height: 8),
 
-          for (
-            int i = 0;
-            i < min(3, max(top3pred.length, actualTop3.length));
-            i++
-          )
+          for (int i = 0; i < 3; i++)
             _ComparisonRow(
               rank: i + 1,
-              predicted: i < top3pred.length ? top3pred[i] : null,
-              actual: i < actualTop3.length ? actualTop3[i] : null,
+              predicted: i < sorted.length ? sorted[i] : null,
+              compHorseNo: i < _compPicks.length ? _compPicks[i] : null,
+              userHorseNo: i < _userPicks.length ? _userPicks[i] : null,
+              actual: widget.results.where((r) => r.rank == i + 1).firstOrNull,
             ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AccuracyBadge extends StatelessWidget {
+  final String label;
+  final double accuracy;
+  final Color color;
+  final IconData icon;
+
+  const _AccuracyBadge({
+    required this.label,
+    required this.accuracy,
+    required this.color,
+    required this.icon,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 12, color: color),
+          const SizedBox(width: 4),
+          Text(
+            '$label ${accuracy.toStringAsFixed(0)}%',
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+              color: color,
+            ),
+          ),
         ],
       ),
     );
@@ -577,135 +704,94 @@ class _AiComparisonSection extends StatelessWidget {
 class _ComparisonRow extends StatelessWidget {
   final int rank;
   final Prediction? predicted;
+  final int? compHorseNo;
+  final int? userHorseNo;
   final RaceResult? actual;
 
-  const _ComparisonRow({required this.rank, this.predicted, this.actual});
+  const _ComparisonRow({
+    required this.rank,
+    this.predicted,
+    this.compHorseNo,
+    this.userHorseNo,
+    this.actual,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final isMatch =
-        predicted != null &&
-        actual != null &&
-        predicted!.horseNo == actual!.horseNo;
+    final actualNo = actual?.horseNo;
+    final aiMatch =
+        predicted != null && actualNo != null && predicted!.horseNo == actualNo;
+    final compMatch =
+        compHorseNo != null && actualNo != null && compHorseNo == actualNo;
+    final userMatch =
+        userHorseNo != null && actualNo != null && userHorseNo == actualNo;
+    final anyMatch = aiMatch || compMatch || userMatch;
     final rankColors = [
       AppTheme.winColor,
       AppTheme.placeColor,
       AppTheme.showColor,
+      const Color(0xFF00B0FF),
+      const Color(0xFFFF6D00),
     ];
-    final color = rankColors[(rank - 1).clamp(0, 2)];
+    final color = rankColors[(rank - 1).clamp(0, 4)];
+
+    Widget badge(int? no, bool matched) {
+      if (no == null) {
+        return Text('-', style: TextStyle(color: Colors.grey.shade600));
+      }
+      return Container(
+        decoration: matched
+            ? BoxDecoration(
+                shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(
+                    color: AppTheme.positiveGreen.withValues(alpha: 0.5),
+                    blurRadius: 6,
+                  ),
+                ],
+              )
+            : null,
+        child: _HorseNumberBadge(no: no, size: 26),
+      );
+    }
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 6),
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+      margin: const EdgeInsets.only(bottom: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
       decoration: BoxDecoration(
-        color: isMatch
+        color: anyMatch
             ? AppTheme.positiveGreen.withValues(alpha: 0.08)
             : Colors.grey.shade800.withValues(alpha: 0.2),
         borderRadius: BorderRadius.circular(10),
-        border: isMatch
+        border: anyMatch
             ? Border.all(color: AppTheme.positiveGreen.withValues(alpha: 0.3))
             : null,
       ),
       child: Row(
         children: [
-          // 순위
           Container(
-            width: 28,
-            height: 28,
+            width: 24,
+            height: 24,
             decoration: BoxDecoration(
               color: color.withValues(alpha: 0.15),
-              borderRadius: BorderRadius.circular(7),
+              borderRadius: BorderRadius.circular(6),
             ),
             child: Center(
               child: Text(
                 '$rank',
                 style: TextStyle(
-                  fontSize: 14,
+                  fontSize: 12,
                   fontWeight: FontWeight.w900,
                   color: color,
                 ),
               ),
             ),
           ),
-          const SizedBox(width: 8),
-          // AI 예측
-          Expanded(
-            child: predicted != null
-                ? Row(
-                    children: [
-                      _HorseNumberBadge(no: predicted!.horseNo, size: 22),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: Text(
-                          predicted!.horseName,
-                          style: const TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      Text(
-                        '${predicted!.winProbability.toStringAsFixed(1)}%',
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                          color: Colors.purpleAccent.shade100,
-                        ),
-                      ),
-                    ],
-                  )
-                : Text(
-                    '-',
-                    style: TextStyle(color: Colors.grey.shade600),
-                    textAlign: TextAlign.center,
-                  ),
-          ),
-          // 화살표
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 6),
-            child: Icon(
-              isMatch ? Icons.check_circle : Icons.compare_arrows,
-              size: 18,
-              color: isMatch ? AppTheme.positiveGreen : Colors.grey.shade600,
-            ),
-          ),
-          // 실제 결과
-          Expanded(
-            child: actual != null
-                ? Row(
-                    children: [
-                      _HorseNumberBadge(no: actual!.horseNo, size: 22),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: Text(
-                          actual!.horseName,
-                          style: const TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      if (actual!.winOdds > 0)
-                        Text(
-                          '${actual!.winOdds.toStringAsFixed(1)}배',
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700,
-                            color: AppTheme.accentGold,
-                          ),
-                        ),
-                    ],
-                  )
-                : Text(
-                    '-',
-                    style: TextStyle(color: Colors.grey.shade600),
-                    textAlign: TextAlign.center,
-                  ),
-          ),
+          const SizedBox(width: 4),
+          Expanded(child: Center(child: badge(predicted?.horseNo, aiMatch))),
+          Expanded(child: Center(child: badge(compHorseNo, compMatch))),
+          Expanded(child: Center(child: badge(userHorseNo, userMatch))),
+          Expanded(child: Center(child: badge(actualNo, false))),
         ],
       ),
     );

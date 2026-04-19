@@ -51,15 +51,19 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         child: NestedScrollView(
           headerSliverBuilder: (context, innerBoxIsScrolled) => [
             SliverAppBar(
-              floating: true,
-              snap: true,
-              title: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.emoji_events, color: AppTheme.accentGold),
-                  const SizedBox(width: 8),
-                  const Text('경마 Plus'),
-                ],
+              pinned: true,
+              expandedHeight: 170,
+              toolbarHeight: 70,
+              title: Padding(
+                padding: const EdgeInsets.only(top: 24),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.emoji_events, color: AppTheme.accentGold),
+                    const SizedBox(width: 8),
+                    const Text('경마 Plus'),
+                  ],
+                ),
               ),
               actions: [
                 IconButton(
@@ -75,9 +79,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   ),
               ],
               bottom: PreferredSize(
-                preferredSize: const Size.fromHeight(100),
+                preferredSize: const Size.fromHeight(114),
                 child: Column(
                   children: [
+                    const SizedBox(height: 14),
                     TabBar(
                       controller: _tabController,
                       tabs: _meetLabels.map((l) => Tab(text: l)).toList(),
@@ -106,10 +111,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                               ),
                               decoration: BoxDecoration(
                                 color: isToday
-                                    ? AppTheme.accentGold
-                                        .withValues(alpha: 0.15)
-                                    : Colors.grey.shade800
-                                        .withValues(alpha: 0.5),
+                                    ? AppTheme.accentGold.withValues(
+                                        alpha: 0.15,
+                                      )
+                                    : Colors.grey.shade800.withValues(
+                                        alpha: 0.5,
+                                      ),
                                 borderRadius: BorderRadius.circular(16),
                               ),
                               child: Text(
@@ -144,8 +151,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           ],
           body: TabBarView(
             controller: _tabController,
-            children: List.generate(_meets.length, (i) =>
-              _RaceListTab(meet: _meets[i], meetLabel: _meetLabels[i]),
+            children: List.generate(
+              _meets.length,
+              (i) => _RaceListTab(meet: _meets[i], meetLabel: _meetLabels[i]),
             ),
           ),
         ),
@@ -158,8 +166,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
   void _prevDay() {
     final current = ref.read(selectedDateProvider);
-    ref.read(selectedDateProvider.notifier).state =
-        current.subtract(const Duration(days: 1));
+    ref.read(selectedDateProvider.notifier).state = current.subtract(
+      const Duration(days: 1),
+    );
   }
 
   void _nextDay() {
@@ -191,8 +200,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   void _share(String dateStr) {
     final meet = _meetLabels[_tabController.index];
     final date = formatDateParam(ref.read(selectedDateProvider));
-    final racesAsync =
-        ref.read(racePlanProvider((meet: _meets[_tabController.index], date: date)));
+    final racesAsync = ref.read(
+      racePlanProvider((meet: _meets[_tabController.index], date: date)),
+    );
     final raceCount = racesAsync.valueOrNull?.length ?? 0;
 
     final text = StringBuffer()
@@ -207,15 +217,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         final time = r.startTime.length >= 4
             ? '${r.startTime.substring(0, 2)}:${r.startTime.substring(2, 4)}'
             : '';
-        text.writeln('${r.raceNo}R $time ${r.raceName} '
-            '${r.distanceLabel} ${r.gradeLabel} ${r.headCount}두');
+        text.writeln(
+          '${r.raceNo}R $time ${r.raceName} '
+          '${r.distanceLabel} ${r.gradeLabel} ${r.headCount}두',
+        );
       }
     }
 
     text.writeln('\n경마 Plus 앱에서 확인하세요!');
     SharePlus.instance.share(ShareParams(text: text.toString()));
   }
-
 }
 
 class _RaceListTab extends ConsumerStatefulWidget {
@@ -234,8 +245,7 @@ class _RaceListTabState extends ConsumerState<_RaceListTab> {
   void _refresh() {
     final dateParam = formatDateParam(ref.read(selectedDateProvider));
     ref.invalidate(racePlanProvider((meet: widget.meet, date: dateParam)));
-    ref.invalidate(
-        raceHeadCountProvider((meet: widget.meet, date: dateParam)));
+    ref.invalidate(raceHeadCountProvider((meet: widget.meet, date: dateParam)));
     setState(() => _lastUpdated = DateTime.now());
   }
 
@@ -243,25 +253,27 @@ class _RaceListTabState extends ConsumerState<_RaceListTab> {
   Widget build(BuildContext context) {
     final selectedDate = ref.watch(selectedDateProvider);
     final dateParam = formatDateParam(selectedDate);
-    final racesAsync =
-        ref.watch(racePlanProvider((meet: widget.meet, date: dateParam)));
+    final racesAsync = ref.watch(
+      racePlanProvider((meet: widget.meet, date: dateParam)),
+    );
 
     return racesAsync.when(
       loading: () => const ShimmerCardList(cardHeight: 130),
-      error: (err, stack) => _ErrorView(
-        message: '경주 정보를 불러올 수 없습니다\n$err',
-        onRetry: _refresh,
-      ),
+      error: (err, stack) =>
+          _ErrorView(message: '경주 정보를 불러올 수 없습니다\n$err', onRetry: _refresh),
       data: (races) {
         if (races.isEmpty) {
           return _EmptyView(date: selectedDate, meetLabel: widget.meetLabel);
         }
         races = [...races]..sort((a, b) => a.raceNo.compareTo(b.raceNo));
 
-        final headCounts = ref
-            .watch(raceHeadCountProvider(
-                (meet: widget.meet, date: dateParam)))
-            .valueOrNull ?? {};
+        final headCounts =
+            ref
+                .watch(
+                  raceHeadCountProvider((meet: widget.meet, date: dateParam)),
+                )
+                .valueOrNull ??
+            {};
 
         return RefreshIndicator(
           onRefresh: () async => _refresh(),
@@ -276,8 +288,7 @@ class _RaceListTabState extends ConsumerState<_RaceListTab> {
                 );
               }
               final race = races[index - 1];
-              final actualHeadCount =
-                  headCounts[race.raceNo] ?? race.headCount;
+              final actualHeadCount = headCounts[race.raceNo] ?? race.headCount;
               return RaceCard(
                 race: race,
                 headCount: actualHeadCount,
@@ -302,10 +313,7 @@ class _UpdateButton extends StatelessWidget {
   final DateTime lastUpdated;
   final VoidCallback onTap;
 
-  const _UpdateButton({
-    required this.lastUpdated,
-    required this.onTap,
-  });
+  const _UpdateButton({required this.lastUpdated, required this.onTap});
 
   String _timeAgo(DateTime from) {
     final diff = DateTime.now().difference(from);
@@ -327,16 +335,16 @@ class _UpdateButton extends StatelessWidget {
             children: [
               Text(
                 '$label 업데이트',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: Colors.grey.shade500,
-                ),
+                style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
               ),
               const SizedBox(width: 6),
               GestureDetector(
                 onTap: onTap,
-                child: Icon(Icons.refresh_rounded,
-                    size: 18, color: AppTheme.primaryGreen),
+                child: Icon(
+                  Icons.refresh_rounded,
+                  size: 18,
+                  color: AppTheme.primaryGreen,
+                ),
               ),
             ],
           ),
