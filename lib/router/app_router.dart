@@ -7,15 +7,13 @@ import '../features/race/screens/race_entry_screen.dart';
 import '../features/race/screens/race_result_screen.dart';
 import '../features/horse/screens/horse_detail_screen.dart';
 import '../features/prediction/screens/prediction_screen.dart';
+import '../features/purchase/screens/subscription_screen.dart';
 import '../models/race_entry.dart';
 
 final appRouter = GoRouter(
   initialLocation: '/',
   routes: [
-    GoRoute(
-      path: '/',
-      builder: (context, state) => const HomeScreen(),
-    ),
+    GoRoute(path: '/', builder: (context, state) => const HomeScreen()),
     GoRoute(
       path: '/race/:meet/:date/:raceNo',
       builder: (context, state) => RaceDetailScreen(
@@ -30,6 +28,7 @@ final appRouter = GoRouter(
         meet: state.pathParameters['meet']!,
         date: state.pathParameters['date']!,
         raceNo: int.parse(state.pathParameters['raceNo']!),
+        initialTabIndex: state.uri.queryParameters['tab'] == 'ai' ? 1 : 0,
       ),
     ),
     GoRoute(
@@ -56,10 +55,11 @@ final appRouter = GoRouter(
         raceNo: int.parse(state.pathParameters['raceNo']!),
       ),
     ),
-  ],
-  errorBuilder: (context, state) => Scaffold(
-    body: Center(
-      child: Text('페이지를 찾을 수 없습니다: ${state.error}'),
+    GoRoute(
+      path: SubscriptionScreen.routePath,
+      builder: (context, state) => const SubscriptionScreen(),
     ),
-  ),
+  ],
+  errorBuilder: (context, state) =>
+      Scaffold(body: Center(child: Text('페이지를 찾을 수 없습니다: ${state.error}'))),
 );

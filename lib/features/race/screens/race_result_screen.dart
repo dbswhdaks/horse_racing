@@ -7,8 +7,11 @@ import '../../../core/constants/api_constants.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/in_app_webview_screen.dart';
 import '../../../core/widgets/shimmer_loading.dart';
+import '../../../models/odds.dart';
+import '../../../models/race_entry.dart';
 import '../../../models/race_result.dart';
 import '../../../models/prediction.dart';
+import '../../purchase/providers/in_app_purchase_provider.dart';
 import '../providers/race_providers.dart';
 
 class RaceResultScreen extends ConsumerWidget {
@@ -31,6 +34,20 @@ class RaceResultScreen extends ConsumerWidget {
     final predAsync = ref.watch(
       predictionProvider((meet: meet, date: date, raceNo: raceNo)),
     );
+    final entriesAsync = ref.watch(
+      raceStartListProvider((meet: meet, date: date, raceNo: raceNo)),
+    );
+    final oddsAsync = ref.watch(
+      oddsProvider((meet: meet, date: date, raceNo: raceNo)),
+    );
+    final purchasedProductIds = ref.watch(
+      inAppPurchaseProvider.select((state) => state.purchasedProductIds),
+    );
+    final canViewPredictionRemark =
+        purchasedProductIds.contains('premium_daily') ||
+        purchasedProductIds.contains('premium_monthly') ||
+        purchasedProductIds.contains('premium_yearly');
+    final canViewPredictionComparison = canViewPredictionRemark;
     final meetName = ApiConstants.meetNames[meet] ?? meet;
 
     return Scaffold(
@@ -149,17 +166,32 @@ class RaceResultScreen extends ConsumerWidget {
 
                     // AI 예측 비교 + 종합추천
                     if (predictions.isNotEmpty)
-                      _AiComparisonSection(
-                        results: sorted,
-                        predictions: predictions,
-                        raceKey: '${meet}_${date}_$raceNo',
-                      ),
+                      canViewPredictionComparison
+                          ? _AiComparisonSection(
+                              results: sorted,
+                              predictions: predictions,
+                              entries: entriesAsync.valueOrNull ?? const [],
+                              odds: oddsAsync.valueOrNull ?? const [],
+                              distance:
+                                  sorted.isNotEmpty && sorted.first.distance > 0
+                                  ? sorted.first.distance
+                                  : 1400,
+                              raceKey: '${meet}_${date}_$raceNo',
+                            )
+                          : _AiComparisonLockedCard(
+                              meet: meet,
+                              date: date,
+                              raceNo: raceNo,
+                            ),
 
                     // 승식별 결과
                     _BettingResultsSection(results: sorted),
 
                     // 레이스 타임 분석
-                    _RaceTimeAnalysis(results: sorted),
+                    _RaceTimeAnalysis(
+                      results: sorted,
+                      canViewPredictionRemark: canViewPredictionRemark,
+                    ),
 
                     // 전체 순위 상세
                     Padding(
@@ -202,6 +234,7 @@ class RaceResultScreen extends ConsumerWidget {
                       (r) => _DetailedResultCard(
                         result: r,
                         prediction: _findPrediction(predictions, r.horseNo),
+                        canViewPredictionRemark: canViewPredictionRemark,
                         onHorseTap: () => context.push(
                           '/horse/${Uri.encodeComponent(r.horseName)}?meet=$meet',
                         ),
@@ -440,14 +473,85 @@ class _PodiumCard extends StatelessWidget {
 // AI 예측 비교 섹션
 // ═══════════════════════════════════════════════════
 
+class _AiComparisonLockedCard extends StatelessWidget {
+  const _AiComparisonLockedCard({
+    required this.meet,
+    required this.date,
+    required this.raceNo,
+  });
+
+  final String meet;
+  final String date;
+  final int raceNo;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            Colors.deepPurple.shade900.withValues(alpha: 0.35),
+            AppTheme.cardDark,
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.deepPurple.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            Icons.lock_rounded,
+            color: Colors.purpleAccent.shade100,
+            size: 20,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              '예측비교는 구독 후 확인할 수 있습니다.',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                color: Colors.grey.shade200,
+              ),
+            ),
+          ),
+          FilledButton(
+            onPressed: () => context.push('/entry/$meet/$date/$raceNo?tab=ai'),
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFF2E5B8A),
+              foregroundColor: Colors.white,
+              minimumSize: const Size(84, 34),
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+            ),
+            child: const Text(
+              '구독하기',
+              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _AiComparisonSection extends StatefulWidget {
   final List<RaceResult> results;
   final List<Prediction> predictions;
+  final List<RaceEntry> entries;
+  final List<Odds> odds;
+  final int distance;
   final String raceKey;
 
   const _AiComparisonSection({
     required this.results,
     required this.predictions,
+    required this.entries,
+    required this.odds,
+    required this.distance,
     required this.raceKey,
   });
 
@@ -486,7 +590,221 @@ class _AiComparisonSectionState extends State<_AiComparisonSection> {
       _compPicks = loaded;
     }
 
+    // 종합추천 저장값이 없으면 상위 예측값으로 임시 표시해 빈칸을 방지
+    if (_compPicks.whereType<int>().isEmpty) {
+      final compTop = _buildComprehensiveTop5();
+      if (compTop.isNotEmpty) {
+        final fallback = List<int?>.filled(5, null);
+        for (var i = 0; i < compTop.length && i < 5; i++) {
+          fallback[i] = compTop[i];
+        }
+        _compPicks = fallback;
+      }
+    }
+
     if (mounted) setState(() {});
+  }
+
+  List<int> _buildComprehensiveTop5() {
+    if (widget.entries.isEmpty) return const [];
+
+    final recs = <_CompRecommendation>[];
+    final ratings = widget.entries.map((e) => e.rating).toList()
+      ..sort((a, b) => b.compareTo(a));
+    final maxRating = ratings.isNotEmpty ? ratings.first : 100.0;
+    final avgRating = ratings.isNotEmpty
+        ? ratings.reduce((a, b) => a + b) / ratings.length
+        : 50.0;
+
+    final runningStyles = <int, String>{};
+    final frontRunners = <int>[];
+    final closers = <int>[];
+
+    for (final entry in widget.entries) {
+      final pred = widget.predictions
+          .where((p) => p.horseNo == entry.horseNo)
+          .firstOrNull;
+      final style = _getRunningStyle(entry, pred);
+      runningStyles[entry.horseNo] = style;
+      if (style == '선행' || style == '선입') {
+        frontRunners.add(entry.horseNo);
+      } else if (style == '추입' || style == '후입') {
+        closers.add(entry.horseNo);
+      }
+    }
+
+    final isFrontHeavy =
+        frontRunners.length >= 4 ||
+        (frontRunners.length >= 3 && widget.entries.length <= 10);
+    final isCloserFavored = closers.length >= 3 && frontRunners.length <= 2;
+
+    final oddsMap = <int, double>{};
+    for (final o in widget.odds) {
+      if ((o.betType == 'WIN' || o.betType == '1') && o.rate > 0) {
+        oddsMap[o.horseNo1] = o.rate;
+      }
+    }
+    final hasOdds = oddsMap.isNotEmpty;
+    final avgOdds = hasOdds
+        ? oddsMap.values.reduce((a, b) => a + b) / oddsMap.length
+        : 10.0;
+
+    for (final entry in widget.entries) {
+      final pred = widget.predictions
+          .where((p) => p.horseNo == entry.horseNo)
+          .firstOrNull;
+      final style = runningStyles[entry.horseNo] ?? '중단';
+      final winOdds = oddsMap[entry.horseNo] ?? 0;
+
+      double ratingScore = 0;
+      final ratingRank = ratings.indexOf(entry.rating) + 1;
+      final ratingPercentile = entry.rating / maxRating;
+      if (ratingRank <= 2 && entry.rating >= 80) {
+        ratingScore = 25;
+      } else if (ratingRank <= 3 && entry.rating >= 70) {
+        ratingScore = 22;
+      } else if (ratingPercentile >= 0.85) {
+        ratingScore = 20;
+      } else if (ratingPercentile >= 0.7) {
+        ratingScore = 15;
+      } else if (entry.rating >= avgRating) {
+        ratingScore = 10;
+      } else {
+        ratingScore = 5;
+      }
+
+      double performanceScore = 0;
+      final winRate = entry.winRate;
+      final placeRate = entry.placeRate;
+      final totalRaces = entry.totalRaces;
+      if (winRate >= 30) {
+        performanceScore += 15;
+      } else if (winRate >= 20) {
+        performanceScore += 12;
+      } else if (winRate >= 10) {
+        performanceScore += 8;
+      } else if (winRate > 0) {
+        performanceScore += 4;
+      }
+      if (placeRate >= 50) {
+        performanceScore += 7;
+      } else if (placeRate >= 35) {
+        performanceScore += 5;
+      } else if (placeRate >= 20) {
+        performanceScore += 3;
+      }
+      if (totalRaces >= 20 && entry.winCount >= 3) {
+        performanceScore += 3;
+      } else if (totalRaces >= 10) {
+        performanceScore += 2;
+      } else if (totalRaces >= 5) {
+        performanceScore += 1;
+      }
+
+      double jockeyScore = 0;
+      if (pred != null && pred.winProbability > 0) {
+        if (pred.winProbability >= 25) {
+          jockeyScore += 12;
+        } else if (pred.winProbability >= 15) {
+          jockeyScore += 10;
+        } else if (pred.winProbability >= 10) {
+          jockeyScore += 7;
+        } else if (pred.winProbability >= 5) {
+          jockeyScore += 4;
+        }
+      }
+      if (hasOdds && winOdds > 0) {
+        if (winOdds <= 3.0) {
+          jockeyScore += 8;
+        } else if (winOdds <= 5.0) {
+          jockeyScore += 6;
+        } else if (winOdds <= avgOdds) {
+          jockeyScore += 4;
+        } else if (winOdds <= avgOdds * 2) {
+          jockeyScore += 2;
+        }
+      } else if (pred != null) {
+        jockeyScore += (pred.winProbability / 100 * 8).clamp(0, 8);
+      }
+
+      double distanceScore = 0;
+      if (entry.winCount >= 2 && totalRaces >= 5) {
+        distanceScore = 15;
+      } else if (entry.winCount >= 1 && totalRaces >= 3) {
+        distanceScore = 12;
+      } else if (totalRaces >= 5 && placeRate >= 30) {
+        distanceScore = 10;
+      } else if (totalRaces >= 3) {
+        distanceScore = 7;
+      } else if (totalRaces >= 1) {
+        distanceScore = 4;
+      } else {
+        distanceScore = 2;
+      }
+
+      double paceScore = 5;
+      if (isFrontHeavy) {
+        if (style == '추입' || style == '후입') {
+          paceScore = 15;
+        } else if (style == '중단') {
+          paceScore = 10;
+        } else {
+          paceScore = 3;
+        }
+      } else if (isCloserFavored || frontRunners.length <= 1) {
+        if (style == '선행' || style == '선입') {
+          paceScore = 15;
+        } else if (style == '중단') {
+          paceScore = 8;
+        }
+      } else {
+        if (ratingRank <= 3) {
+          paceScore = 10;
+        } else {
+          paceScore = 7;
+        }
+      }
+
+      final totalScore =
+          ratingScore +
+          performanceScore +
+          jockeyScore +
+          distanceScore +
+          paceScore;
+      recs.add(
+        _CompRecommendation(
+          horseNo: entry.horseNo,
+          totalScore: totalScore,
+          ratingScore: ratingScore,
+        ),
+      );
+    }
+
+    recs.sort((a, b) {
+      final scoreDiff = b.totalScore.compareTo(a.totalScore);
+      if (scoreDiff != 0) return scoreDiff;
+      return b.ratingScore.compareTo(a.ratingScore);
+    });
+
+    return recs.take(5).map((e) => e.horseNo).toList();
+  }
+
+  String _getRunningStyle(RaceEntry entry, Prediction? pred) {
+    final rating = entry.rating;
+    final winRate = entry.winRate;
+    final totalRaces = entry.totalRaces;
+
+    if (pred != null && pred.winProbability > 15) {
+      if (rating >= 80) return '선행';
+      if (rating >= 60) return '선입';
+      return '추입';
+    }
+
+    if (totalRaces < 3) return '미지수';
+    if (rating >= 85 && winRate >= 20) return '선행';
+    if (rating >= 70) return '선입';
+    if (rating >= 50) return '중단';
+    return '후입';
   }
 
   int _countHits(List<int> picks, List<RaceResult> actual) {
@@ -798,6 +1116,18 @@ class _ComparisonRow extends StatelessWidget {
   }
 }
 
+class _CompRecommendation {
+  final int horseNo;
+  final double totalScore;
+  final double ratingScore;
+
+  const _CompRecommendation({
+    required this.horseNo,
+    required this.totalScore,
+    required this.ratingScore,
+  });
+}
+
 // ═══════════════════════════════════════════════════
 // 승식별 결과
 // ═══════════════════════════════════════════════════
@@ -1018,14 +1348,21 @@ class _BetCard extends StatelessWidget {
 
 class _RaceTimeAnalysis extends StatelessWidget {
   final List<RaceResult> results;
-  const _RaceTimeAnalysis({required this.results});
+  final bool canViewPredictionRemark;
+
+  const _RaceTimeAnalysis({
+    required this.results,
+    required this.canViewPredictionRemark,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final hasPassOrderData =
+        canViewPredictionRemark && results.any((r) => r.passOrder.isNotEmpty);
     final hasTimeData = results.any(
-      (r) => r.s1f.isNotEmpty || r.g3f.isNotEmpty || r.passOrder.isNotEmpty,
+      (r) => r.s1f.isNotEmpty || r.g3f.isNotEmpty,
     );
-    if (!hasTimeData) return const SizedBox.shrink();
+    if (!hasTimeData && !hasPassOrderData) return const SizedBox.shrink();
 
     return Container(
       margin: const EdgeInsets.fromLTRB(12, 12, 12, 0),
@@ -1105,7 +1442,7 @@ class _RaceTimeAnalysis extends StatelessWidget {
                       textAlign: TextAlign.center,
                     ),
                   ),
-                if (results.any((r) => r.passOrder.isNotEmpty))
+                if (hasPassOrderData)
                   const Expanded(
                     flex: 3,
                     child: Text(
@@ -1204,7 +1541,7 @@ class _RaceTimeAnalysis extends StatelessWidget {
                         ),
                       ),
                     ),
-                  if (results.any((r) => r.passOrder.isNotEmpty))
+                  if (hasPassOrderData)
                     Expanded(
                       flex: 3,
                       child: Text(
@@ -1235,11 +1572,13 @@ class _RaceTimeAnalysis extends StatelessWidget {
 class _DetailedResultCard extends StatelessWidget {
   final RaceResult result;
   final Prediction? prediction;
+  final bool canViewPredictionRemark;
   final VoidCallback onHorseTap;
 
   const _DetailedResultCard({
     required this.result,
     this.prediction,
+    required this.canViewPredictionRemark,
     required this.onHorseTap,
   });
 
@@ -1431,7 +1770,7 @@ class _DetailedResultCard extends StatelessWidget {
               ],
 
               // 3행: 통과순위 (있을 때만)
-              if (_hasValidStr(result.passOrder) ||
+              if ((_hasValidStr(result.passOrder) && canViewPredictionRemark) ||
                   _hasValidStr(result.s1f)) ...[
                 const SizedBox(height: 8),
                 Container(
@@ -1448,7 +1787,8 @@ class _DetailedResultCard extends StatelessWidget {
                     spacing: 12,
                     runSpacing: 4,
                     children: [
-                      if (_hasValidStr(result.passOrder))
+                      if (_hasValidStr(result.passOrder) &&
+                          canViewPredictionRemark)
                         _InlineLabel('통과순위', result.passOrder),
                       if (_hasValidStr(result.s1f))
                         _InlineLabel('S1F', result.s1f),

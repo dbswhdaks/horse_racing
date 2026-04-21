@@ -11,6 +11,7 @@ import '../../../models/race.dart';
 import '../../../models/race_entry.dart';
 import '../../../models/odds.dart';
 import '../../../models/prediction.dart';
+import '../../purchase/providers/in_app_purchase_provider.dart';
 import '../providers/race_providers.dart';
 import '../widgets/race_auto_refresh_hook.dart';
 
@@ -18,16 +19,19 @@ class RaceEntryScreen extends ConsumerWidget {
   final String meet;
   final String date;
   final int raceNo;
+  final int initialTabIndex;
 
   const RaceEntryScreen({
     super.key,
     required this.meet,
     required this.date,
     required this.raceNo,
+    this.initialTabIndex = 0,
   });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final iapState = ref.watch(inAppPurchaseProvider);
     final raceAsync = ref.watch(racePlanProvider((meet: meet, date: date)));
     final entriesAsync = ref.watch(
       raceStartListProvider((meet: meet, date: date, raceNo: raceNo)),
@@ -39,12 +43,20 @@ class RaceEntryScreen extends ConsumerWidget {
       predictionProvider((meet: meet, date: date, raceNo: raceNo)),
     );
     final meetName = ApiConstants.meetNames[meet] ?? meet;
+    final purchasedProductIds = ref.watch(
+      inAppPurchaseProvider.select((state) => state.purchasedProductIds),
+    );
+    final canViewComprehensive =
+        purchasedProductIds.contains('premium_daily') ||
+        purchasedProductIds.contains('premium_monthly') ||
+        purchasedProductIds.contains('premium_yearly');
     final race = raceAsync.valueOrNull
         ?.where((r) => r.raceNo == raceNo)
         .firstOrNull;
 
     return DefaultTabController(
       length: 2,
+      initialIndex: initialTabIndex.clamp(0, 1),
       child: Scaffold(
         appBar: AppBar(
           toolbarHeight: 64,
@@ -62,10 +74,28 @@ class RaceEntryScreen extends ConsumerWidget {
           centerTitle: false,
           actions: [
             if (_isRaceFinished(race))
-              IconButton(
-                icon: const Icon(Icons.emoji_events_rounded, size: 22),
-                tooltip: '경주결과',
-                onPressed: () => context.push('/result/$meet/$date/$raceNo'),
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: TextButton.icon(
+                  onPressed: () => context.push('/result/$meet/$date/$raceNo'),
+                  icon: Icon(
+                    Icons.emoji_events_rounded,
+                    size: 18,
+                    color: AppTheme.winColor,
+                  ),
+                  label: Text(
+                    '결과',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      color: AppTheme.winColor,
+                    ),
+                  ),
+                  style: TextButton.styleFrom(
+                    foregroundColor: AppTheme.winColor,
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                  ),
+                ),
               ),
           ],
           bottom: PreferredSize(
@@ -117,9 +147,16 @@ class RaceEntryScreen extends ConsumerWidget {
                       entriesAsync,
                       oddsAsync,
                       predAsync,
+                      canViewComprehensive,
                     ),
                     // ── AI 추천 탭 ──
-                    _buildAiTab(context, entriesAsync, predAsync),
+                    _buildAiTab(
+                      context,
+                      entriesAsync,
+                      predAsync,
+                      canViewComprehensive,
+                      iapState,
+                    ),
                   ],
                 ),
               ),
@@ -137,6 +174,7 @@ class RaceEntryScreen extends ConsumerWidget {
     AsyncValue<List<RaceEntry>> entriesAsync,
     AsyncValue<List<Odds>> oddsAsync,
     AsyncValue<PredictionReport?> predAsync,
+    bool canViewComprehensive,
   ) {
     return entriesAsync.when(
       loading: () => ListView(
@@ -194,6 +232,9 @@ class RaceEntryScreen extends ConsumerWidget {
             SliverToBoxAdapter(
               child: () {
                 if (entries.isEmpty) return const SizedBox.shrink();
+                if (!canViewComprehensive) {
+                  return const _PremiumSubscribeInlineCta();
+                }
                 return _ComprehensiveRecommendation(
                   raceKey: '${meet}_${date}_$raceNo',
                   entries: entries,
@@ -208,9 +249,13 @@ class RaceEntryScreen extends ConsumerWidget {
             SliverToBoxAdapter(
               child: () {
                 if (entries.isEmpty) return const SizedBox.shrink();
+                if (!canViewComprehensive) {
+                  return const SizedBox.shrink();
+                }
                 return _RacePacePreview(
                   entries: entries,
                   predictions: predictions,
+                  odds: odds,
                   distance: race?.distance ?? 1400,
                 );
               }(),
@@ -229,36 +274,6 @@ class RaceEntryScreen extends ConsumerWidget {
                         fontWeight: FontWeight.w800,
                       ),
                     ),
-                    const Spacer(),
-                    if (_isRaceFinished(race))
-                      GestureDetector(
-                        onTap: () =>
-                            context.push('/result/$meet/$date/$raceNo'),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              Icons.emoji_events_rounded,
-                              size: 15,
-                              color: AppTheme.winColor,
-                            ),
-                            const SizedBox(width: 4),
-                            Text(
-                              '결과',
-                              style: TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w700,
-                                color: AppTheme.winColor,
-                              ),
-                            ),
-                            Icon(
-                              Icons.chevron_right_rounded,
-                              size: 18,
-                              color: AppTheme.winColor,
-                            ),
-                          ],
-                        ),
-                      ),
                   ],
                 ),
               ),
@@ -323,7 +338,13 @@ class RaceEntryScreen extends ConsumerWidget {
     BuildContext context,
     AsyncValue<List<RaceEntry>> entriesAsync,
     AsyncValue<PredictionReport?> predAsync,
+    bool canViewComprehensive,
+    InAppPurchaseState iapState,
   ) {
+    if (!canViewComprehensive) {
+      return _PremiumSubscriptionPaywall(iapState: iapState);
+    }
+
     return predAsync.when(
       loading: () => ListView(
         padding: const EdgeInsets.all(12),
@@ -367,7 +388,6 @@ class RaceEntryScreen extends ConsumerWidget {
         final meetName = ApiConstants.meetNames[meet] ?? meet;
         final sorted = [...report.predictions]
           ..sort((a, b) => b.winProbability.compareTo(a.winProbability));
-        final top3 = sorted.take(3).toList();
 
         final gap = sorted.length >= 2
             ? sorted[0].winProbability - sorted[1].winProbability
@@ -382,6 +402,7 @@ class RaceEntryScreen extends ConsumerWidget {
               raceKey: '${meet}_${date}_$raceNo',
               entries: entries,
               predictions: sorted,
+              horizontalMargin: 0,
             ),
             const SizedBox(height: 20),
             // AI 예측 신뢰도 카드
@@ -446,7 +467,7 @@ class RaceEntryScreen extends ConsumerWidget {
                   ClipRRect(
                     borderRadius: BorderRadius.circular(3),
                     child: LinearProgressIndicator(
-                      value: (top3.first.winProbability / 100).clamp(0.0, 1.0),
+                      value: (confidence / 100).clamp(0.0, 1.0),
                       minHeight: 7,
                       backgroundColor: Colors.white.withValues(alpha: 0.1),
                       valueColor: const AlwaysStoppedAnimation(
@@ -646,7 +667,7 @@ class RaceEntryScreen extends ConsumerWidget {
                       ClipRRect(
                         borderRadius: BorderRadius.circular(2),
                         child: LinearProgressIndicator(
-                          value: (pred.winProbability / 30).clamp(0.0, 1.0),
+                          value: (pred.winProbability / 100).clamp(0.0, 1.0),
                           minHeight: 4,
                           backgroundColor: Colors.transparent,
                           valueColor: const AlwaysStoppedAnimation(
@@ -955,11 +976,13 @@ class RaceEntryScreen extends ConsumerWidget {
 class _RacePacePreview extends StatelessWidget {
   final List<RaceEntry> entries;
   final List<Prediction> predictions;
+  final List<Odds> odds;
   final int distance;
 
   const _RacePacePreview({
     required this.entries,
     required this.predictions,
+    required this.odds,
     required this.distance,
   });
 
@@ -1012,30 +1035,213 @@ class _RacePacePreview extends StatelessWidget {
     return (pos * totalHorses / 7).round().clamp(1, totalHorses);
   }
 
+  Map<int, int> _buildComprehensiveRankMap() {
+    final recs = <(int horseNo, double totalScore, double ratingScore)>[];
+    if (entries.isEmpty) return {};
+
+    final ratings = entries.map((e) => e.rating).toList()
+      ..sort((a, b) => b.compareTo(a));
+    final maxRating = ratings.isNotEmpty ? ratings.first : 100.0;
+    final avgRating = ratings.isNotEmpty
+        ? ratings.reduce((a, b) => a + b) / ratings.length
+        : 50.0;
+
+    final runningStyles = <int, String>{};
+    final frontRunners = <int>[];
+    final closers = <int>[];
+
+    for (final entry in entries) {
+      final pred = predictions
+          .where((p) => p.horseNo == entry.horseNo)
+          .firstOrNull;
+      final style = _getRunningStyle(entry, pred);
+      runningStyles[entry.horseNo] = style;
+      if (style == '선행' || style == '선입') {
+        frontRunners.add(entry.horseNo);
+      } else if (style == '추입' || style == '후입') {
+        closers.add(entry.horseNo);
+      }
+    }
+
+    final isFrontHeavy =
+        frontRunners.length >= 4 ||
+        (frontRunners.length >= 3 && entries.length <= 10);
+    final isCloserFavored = closers.length >= 3 && frontRunners.length <= 2;
+
+    final oddsMap = <int, double>{};
+    for (final o in odds) {
+      if ((o.betType == 'WIN' || o.betType == '1') && o.rate > 0) {
+        oddsMap[o.horseNo1] = o.rate;
+      }
+    }
+    final hasOdds = oddsMap.isNotEmpty;
+    final avgOdds = hasOdds
+        ? oddsMap.values.reduce((a, b) => a + b) / oddsMap.length
+        : 10.0;
+
+    for (final entry in entries) {
+      final pred = predictions
+          .where((p) => p.horseNo == entry.horseNo)
+          .firstOrNull;
+      final style = runningStyles[entry.horseNo] ?? '중단';
+      final winOdds = oddsMap[entry.horseNo] ?? 0;
+
+      double ratingScore = 0;
+      final ratingRank = ratings.indexOf(entry.rating) + 1;
+      final ratingPercentile = entry.rating / maxRating;
+      if (ratingRank <= 2 && entry.rating >= 80) {
+        ratingScore = 25;
+      } else if (ratingRank <= 3 && entry.rating >= 70) {
+        ratingScore = 22;
+      } else if (ratingPercentile >= 0.85) {
+        ratingScore = 20;
+      } else if (ratingPercentile >= 0.7) {
+        ratingScore = 15;
+      } else if (entry.rating >= avgRating) {
+        ratingScore = 10;
+      } else {
+        ratingScore = 5;
+      }
+
+      double performanceScore = 0;
+      final winRate = entry.winRate;
+      final placeRate = entry.placeRate;
+      final totalRaces = entry.totalRaces;
+      if (winRate >= 30) {
+        performanceScore += 15;
+      } else if (winRate >= 20) {
+        performanceScore += 12;
+      } else if (winRate >= 10) {
+        performanceScore += 8;
+      } else if (winRate > 0) {
+        performanceScore += 4;
+      }
+      if (placeRate >= 50) {
+        performanceScore += 7;
+      } else if (placeRate >= 35) {
+        performanceScore += 5;
+      } else if (placeRate >= 20) {
+        performanceScore += 3;
+      }
+      if (totalRaces >= 20 && entry.winCount >= 3) {
+        performanceScore += 3;
+      } else if (totalRaces >= 10) {
+        performanceScore += 2;
+      } else if (totalRaces >= 5) {
+        performanceScore += 1;
+      }
+
+      double jockeyScore = 0;
+      if (pred != null && pred.winProbability > 0) {
+        if (pred.winProbability >= 25) {
+          jockeyScore += 12;
+        } else if (pred.winProbability >= 15) {
+          jockeyScore += 10;
+        } else if (pred.winProbability >= 10) {
+          jockeyScore += 7;
+        } else if (pred.winProbability >= 5) {
+          jockeyScore += 4;
+        }
+      }
+      if (hasOdds && winOdds > 0) {
+        if (winOdds <= 3.0) {
+          jockeyScore += 8;
+        } else if (winOdds <= 5.0) {
+          jockeyScore += 6;
+        } else if (winOdds <= avgOdds) {
+          jockeyScore += 4;
+        } else if (winOdds <= avgOdds * 2) {
+          jockeyScore += 2;
+        }
+      } else if (pred != null) {
+        jockeyScore += (pred.winProbability / 100 * 8).clamp(0, 8);
+      }
+
+      double distanceScore = 0;
+      if (entry.winCount >= 2 && totalRaces >= 5) {
+        distanceScore = 15;
+      } else if (entry.winCount >= 1 && totalRaces >= 3) {
+        distanceScore = 12;
+      } else if (totalRaces >= 5 && placeRate >= 30) {
+        distanceScore = 10;
+      } else if (totalRaces >= 3) {
+        distanceScore = 7;
+      } else if (totalRaces >= 1) {
+        distanceScore = 4;
+      } else {
+        distanceScore = 2;
+      }
+
+      double paceScore = 5;
+      if (isFrontHeavy) {
+        if (style == '추입' || style == '후입') {
+          paceScore = 15;
+        } else if (style == '중단') {
+          paceScore = 10;
+        } else {
+          paceScore = 3;
+        }
+      } else if (isCloserFavored || frontRunners.length <= 1) {
+        if (style == '선행' || style == '선입') {
+          paceScore = 15;
+        } else if (style == '중단') {
+          paceScore = 8;
+        }
+      } else {
+        paceScore = ratingRank <= 3 ? 10 : 7;
+      }
+
+      final totalScore =
+          ratingScore +
+          performanceScore +
+          jockeyScore +
+          distanceScore +
+          paceScore;
+      recs.add((entry.horseNo, totalScore, ratingScore));
+    }
+
+    recs.sort((a, b) {
+      final scoreDiff = b.$2.compareTo(a.$2);
+      if (scoreDiff != 0) return scoreDiff;
+      return b.$3.compareTo(a.$3);
+    });
+
+    final rankMap = <int, int>{};
+    for (int i = 0; i < recs.length; i++) {
+      rankMap[recs[i].$1] = i + 1;
+    }
+    return rankMap;
+  }
+
   @override
   Widget build(BuildContext context) {
     final sorted = List<RaceEntry>.from(entries)
       ..sort((a, b) => a.horseNo.compareTo(b.horseNo));
 
     final horsePaces = <int, _HorsePaceData>{};
+    final comprehensiveRankMap = _buildComprehensiveRankMap();
     for (final entry in sorted) {
       final pred = predictions
           .where((p) => p.horseNo == entry.horseNo)
           .firstOrNull;
       final style = _getRunningStyle(entry, pred);
+      final positions = List.generate(
+        4,
+        (i) => _estimatePosition(style, i, sorted.length),
+      );
+      final compRank = comprehensiveRankMap[entry.horseNo];
+      if (compRank != null) {
+        // 결승 구간 순위는 종합추천 순위와 동일하게 맞춥니다.
+        positions[3] = compRank.clamp(1, sorted.length);
+      }
       horsePaces[entry.horseNo] = _HorsePaceData(
         horseNo: entry.horseNo,
         horseName: entry.horseName,
         style: style,
         color: _styleColor(style),
-        positions: List.generate(
-          4,
-          (i) => _estimatePosition(style, i, sorted.length),
-        ),
+        positions: positions,
       );
     }
-
-    final phases = ['스타트', '1코너', '3코너', '결승'];
 
     return Container(
       margin: const EdgeInsets.fromLTRB(12, 4, 12, 4),
@@ -1075,34 +1281,7 @@ class _RacePacePreview extends StatelessWidget {
           ),
           const SizedBox(height: 16),
 
-          Row(
-            children: phases.asMap().entries.map((e) {
-              final isLast = e.key == phases.length - 1;
-              return Expanded(
-                child: Column(
-                  children: [
-                    Text(
-                      e.value,
-                      style: TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w600,
-                        color: isLast
-                            ? AppTheme.winColor
-                            : Colors.grey.shade500,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Container(
-                      height: 2,
-                      color: isLast
-                          ? AppTheme.winColor.withValues(alpha: 0.5)
-                          : Colors.grey.shade700,
-                    ),
-                  ],
-                ),
-              );
-            }).toList(),
-          ),
+          _PacePhaseSelector(horsePaces: horsePaces.values.toList()),
           const SizedBox(height: 12),
 
           ...['선행', '선입', '중단', '추입', '후입'].map((style) {
@@ -1370,6 +1549,114 @@ class _RacePacePreview extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _PacePhaseSelector extends StatefulWidget {
+  const _PacePhaseSelector({required this.horsePaces});
+
+  final List<_HorsePaceData> horsePaces;
+
+  @override
+  State<_PacePhaseSelector> createState() => _PacePhaseSelectorState();
+}
+
+class _PacePhaseSelectorState extends State<_PacePhaseSelector> {
+  static const _phases = ['스타트', '1코너', '3코너', '결승'];
+  int _selectedPhase = 3;
+
+  @override
+  Widget build(BuildContext context) {
+    final phaseSorted = [...widget.horsePaces]
+      ..sort((a, b) {
+        final byPos = a.positions[_selectedPhase].compareTo(
+          b.positions[_selectedPhase],
+        );
+        if (byPos != 0) return byPos;
+        return a.horseNo.compareTo(b.horseNo);
+      });
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: _phases.asMap().entries.map((entry) {
+            final idx = entry.key;
+            final selected = idx == _selectedPhase;
+            return Expanded(
+              child: InkWell(
+                borderRadius: BorderRadius.circular(8),
+                onTap: () => setState(() => _selectedPhase = idx),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 2),
+                  child: Column(
+                    children: [
+                      Text(
+                        entry.value,
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: selected
+                              ? FontWeight.w800
+                              : FontWeight.w600,
+                          color: selected
+                              ? AppTheme.winColor
+                              : Colors.grey.shade500,
+                        ),
+                      ),
+                      const SizedBox(height: 5),
+                      AnimatedContainer(
+                        duration: const Duration(milliseconds: 180),
+                        height: 3,
+                        decoration: BoxDecoration(
+                          color: selected
+                              ? AppTheme.winColor
+                              : Colors.grey.shade700,
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          }).toList(),
+        ),
+        const SizedBox(height: 10),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.04),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: phaseSorted.take(8).map((horse) {
+              final position = horse.positions[_selectedPhase];
+              return Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: horse.color.withValues(alpha: 0.16),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: horse.color.withValues(alpha: 0.35),
+                  ),
+                ),
+                child: Text(
+                  '$position위 ${horse.horseNo}번',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: horse.color,
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -1956,6 +2243,262 @@ class _ComprehensiveRecommendation extends StatelessWidget {
   }
 }
 
+class _PremiumSubscriptionPaywall extends ConsumerStatefulWidget {
+  const _PremiumSubscriptionPaywall({required this.iapState});
+
+  final InAppPurchaseState iapState;
+
+  @override
+  ConsumerState<_PremiumSubscriptionPaywall> createState() =>
+      _PremiumSubscriptionPaywallState();
+}
+
+class _PremiumSubscribeInlineCta extends StatelessWidget {
+  const _PremiumSubscribeInlineCta();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 6, 12, 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF171B24),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(
+                Icons.workspace_premium_rounded,
+                color: AppTheme.accentGold,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  '프리미엄 구독으로 종합추천/AI추천 보기',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.grey.shade200,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Center(
+            child: FilledButton(
+              onPressed: () {
+                final tabController = DefaultTabController.of(context);
+                tabController.animateTo(1);
+              },
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFF2E5B8A),
+                foregroundColor: Colors.white,
+                minimumSize: const Size(220, 38),
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+              ),
+              child: const Text(
+                '구독하기',
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PremiumSubscriptionPaywallState
+    extends ConsumerState<_PremiumSubscriptionPaywall> {
+  String _selectedProductId = 'premium_monthly';
+
+  @override
+  Widget build(BuildContext context) {
+    final notifier = ref.read(inAppPurchaseProvider.notifier);
+    final productMap = {for (final p in widget.iapState.products) p.id: p};
+    final isPending = widget.iapState.isPurchasePending;
+    final isMonthly = _selectedProductId == 'premium_monthly';
+    final actionText = isMonthly ? '월간 구독' : '연간 구독';
+
+    String formatPriceSpacing(String raw) {
+      return raw.replaceAllMapped(
+        RegExp(r'[￦₩]\s*'),
+        (match) => '${match.group(0)![0]} ',
+      );
+    }
+
+    String monthlyText() {
+      final monthly = productMap['premium_monthly'];
+      if (monthly != null) return '월간 ${formatPriceSpacing(monthly.price)}';
+      return '월간 ￦ 9,900원';
+    }
+
+    String yearlyText() {
+      final yearly = productMap['premium_yearly'];
+      if (yearly != null) {
+        return '연간 ${formatPriceSpacing(yearly.price)} (17% 절약)';
+      }
+      return '연간 ￦ 99,000원 (17% 절약)';
+    }
+
+    final card = Column(
+      children: [
+        Container(
+          padding: const EdgeInsets.fromLTRB(18, 18, 18, 18),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.17)),
+            gradient: const LinearGradient(
+              colors: [Color(0xFF141D29), Color(0xFF0F1722)],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+          ),
+          child: Column(
+            children: [
+              const Icon(Icons.lock_rounded, color: Colors.amber, size: 32),
+              const SizedBox(height: 12),
+              const Text(
+                'AI 추천, 종합추천은\n구독 후 이용할 수 있습니다.',
+                textAlign: TextAlign.left,
+                style: TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w900,
+                  height: 1.35,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                '결제 완료 후 앱으로 돌아오면 자동으로 잠금이 해제됩니다.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 17 / 2,
+                  color: Colors.grey.shade400,
+                  height: 1.4,
+                ),
+              ),
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.16),
+                  ),
+                  color: Colors.white.withValues(alpha: 0.02),
+                ),
+                child: Column(
+                  children: [
+                    _PlanOptionTile(
+                      selected: isMonthly,
+                      label: monthlyText(),
+                      onTap: () => setState(
+                        () => _selectedProductId = 'premium_monthly',
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    _PlanOptionTile(
+                      selected: !isMonthly,
+                      label: yearlyText(),
+                      onTap: () =>
+                          setState(() => _selectedProductId = 'premium_yearly'),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              SizedBox(
+                width: 220,
+                child: FilledButton.icon(
+                  onPressed: isPending
+                      ? null
+                      : () async {
+                          final ok = await notifier.buyNonConsumable(
+                            _selectedProductId,
+                          );
+                          if (!ok && context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('결제를 시작하지 못했습니다.')),
+                            );
+                          }
+                        },
+                  icon: const Icon(Icons.verified_rounded, size: 18),
+                  label: Text(
+                    actionText,
+                    style: const TextStyle(
+                      fontSize: 32 / 2,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFF2E5B8A),
+                    foregroundColor: Colors.white,
+                    minimumSize: const Size(220, 48),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(28),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 4),
+            ],
+          ),
+        ),
+      ],
+    );
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(22, 22, 22, 24),
+      children: [card],
+    );
+  }
+}
+
+class _PlanOptionTile extends StatelessWidget {
+  const _PlanOptionTile({
+    required this.selected,
+    required this.label,
+    required this.onTap,
+  });
+
+  final bool selected;
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 15),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(13),
+          color: selected ? const Color(0x33FFB300) : const Color(0x12000000),
+          border: Border.all(
+            color: selected
+                ? const Color(0xCCFFB300)
+                : Colors.white.withValues(alpha: 0.2),
+          ),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 35 / 2,
+            fontWeight: FontWeight.w800,
+            color: selected ? Colors.amber : Colors.white,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _HorseRecommendation {
   final int horseNo;
   final String horseName;
@@ -2452,12 +2995,14 @@ class _NumberRecommender extends StatefulWidget {
   final String raceKey;
   final List<RaceEntry> entries;
   final List<Prediction> predictions;
+  final double horizontalMargin;
 
   const _NumberRecommender({
     super.key,
     required this.raceKey,
     required this.entries,
     required this.predictions,
+    this.horizontalMargin = 14,
   });
 
   @override
@@ -2583,7 +3128,7 @@ class _NumberRecommenderState extends State<_NumberRecommender> {
     final hasAny = _selectedSet.isNotEmpty;
 
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 14),
+      margin: EdgeInsets.symmetric(horizontal: widget.horizontalMargin),
       padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
       decoration: BoxDecoration(
         gradient: const LinearGradient(
