@@ -2,12 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../features/home/screens/home_screen.dart';
+import '../features/purchase/screens/subscription_screen.dart';
 import '../features/race/screens/race_detail_screen.dart';
 import '../features/race/screens/race_entry_screen.dart';
 import '../features/race/screens/race_result_screen.dart';
 import '../features/horse/screens/horse_detail_screen.dart';
 import '../features/prediction/screens/prediction_screen.dart';
-import '../features/purchase/screens/subscription_screen.dart';
 import '../models/race_entry.dart';
 
 final appRouter = GoRouter(
@@ -56,8 +56,13 @@ final appRouter = GoRouter(
       ),
     ),
     GoRoute(
-      path: SubscriptionScreen.routePath,
-      builder: (context, state) => const SubscriptionScreen(),
+      path: '/subscription',
+      builder: (context, state) => SubscriptionScreen(
+        initialProductId:
+            state.uri.queryParameters['plan'] == 'premium_yearly'
+            ? 'premium_yearly'
+            : 'premium_monthly',
+      ),
     ),
   ],
   errorBuilder: (context, state) =>

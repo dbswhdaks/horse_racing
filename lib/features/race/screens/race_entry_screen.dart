@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/constants/api_constants.dart';
+import '../../../core/constants/iap_constants.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/shimmer_loading.dart';
@@ -46,10 +47,9 @@ class RaceEntryScreen extends ConsumerWidget {
     final purchasedProductIds = ref.watch(
       inAppPurchaseProvider.select((state) => state.purchasedProductIds),
     );
-    final canViewComprehensive =
-        purchasedProductIds.contains('premium_daily') ||
-        purchasedProductIds.contains('premium_monthly') ||
-        purchasedProductIds.contains('premium_yearly');
+    final canViewComprehensive = purchasedProductIds.any(
+      IapConstants.subscriptionProductIds.contains,
+    );
     final race = raceAsync.valueOrNull
         ?.where((r) => r.raceNo == raceNo)
         .firstOrNull;
@@ -2258,6 +2258,10 @@ class _PremiumSubscribeInlineCta extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    void moveToSubscription() {
+      context.push('/subscription?plan=premium_monthly');
+    }
+
     return Container(
       margin: const EdgeInsets.fromLTRB(12, 6, 12, 8),
       padding: const EdgeInsets.all(12),
@@ -2291,21 +2295,23 @@ class _PremiumSubscribeInlineCta extends StatelessWidget {
           const SizedBox(height: 10),
           Center(
             child: FilledButton(
-              onPressed: () {
-                final tabController = DefaultTabController.of(context);
-                tabController.animateTo(1);
-              },
+              onPressed: moveToSubscription,
               style: FilledButton.styleFrom(
                 backgroundColor: const Color(0xFF2E5B8A),
                 foregroundColor: Colors.white,
                 minimumSize: const Size(220, 38),
                 padding: const EdgeInsets.symmetric(horizontal: 12),
               ),
-              child: const Text(
+              child: Text(
                 '구독하기',
-                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
               ),
             ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '결제는 구글플레이에서 진행되며 신용카드, 휴대폰 결제, 계좌이체(지원 시) 중 선택할 수 있습니다.',
+            style: TextStyle(fontSize: 11, color: Colors.grey.shade400, height: 1.4),
           ),
         ],
       ),
@@ -2319,11 +2325,8 @@ class _PremiumSubscriptionPaywallState
 
   @override
   Widget build(BuildContext context) {
-    final notifier = ref.read(inAppPurchaseProvider.notifier);
     final productMap = {for (final p in widget.iapState.products) p.id: p};
-    final isPending = widget.iapState.isPurchasePending;
     final isMonthly = _selectedProductId == 'premium_monthly';
-    final actionText = isMonthly ? '월간 구독' : '연간 구독';
 
     String formatPriceSpacing(String raw) {
       return raw.replaceAllMapped(
@@ -2346,110 +2349,73 @@ class _PremiumSubscriptionPaywallState
       return '연간 ￦ 99,000원 (17% 절약)';
     }
 
-    final card = Column(
-      children: [
-        Container(
-          padding: const EdgeInsets.fromLTRB(18, 18, 18, 18),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: Colors.white.withValues(alpha: 0.17)),
-            gradient: const LinearGradient(
-              colors: [Color(0xFF141D29), Color(0xFF0F1722)],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
+    final card = Container(
+      padding: const EdgeInsets.fromLTRB(18, 18, 18, 18),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.17)),
+        gradient: const LinearGradient(
+          colors: [Color(0xFF141D29), Color(0xFF0F1722)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+      ),
+      child: Column(
+        children: [
+          const Icon(Icons.lock_rounded, color: Colors.amber, size: 32),
+          const SizedBox(height: 12),
+          const Text(
+            'AI 추천, 종합추천은\n구독 후 이용할 수 있습니다.',
+            textAlign: TextAlign.left,
+            style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900, height: 1.35),
+          ),
+          const SizedBox(height: 16),
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
+              color: Colors.white.withValues(alpha: 0.02),
+            ),
+            child: Column(
+              children: [
+                _PlanOptionTile(
+                  selected: isMonthly,
+                  label: monthlyText(),
+                  onTap: () => setState(() => _selectedProductId = 'premium_monthly'),
+                ),
+                const SizedBox(height: 10),
+                _PlanOptionTile(
+                  selected: !isMonthly,
+                  label: yearlyText(),
+                  onTap: () => setState(() => _selectedProductId = 'premium_yearly'),
+                ),
+              ],
             ),
           ),
-          child: Column(
-            children: [
-              const Icon(Icons.lock_rounded, color: Colors.amber, size: 32),
-              const SizedBox(height: 12),
-              const Text(
-                'AI 추천, 종합추천은\n구독 후 이용할 수 있습니다.',
-                textAlign: TextAlign.left,
-                style: TextStyle(
-                  fontSize: 17,
-                  fontWeight: FontWeight.w900,
-                  height: 1.35,
+          const SizedBox(height: 16),
+          SizedBox(
+            width: 220,
+            child: FilledButton.icon(
+              onPressed: () => context.push('/subscription?plan=$_selectedProductId'),
+              icon: const Icon(Icons.verified_rounded, size: 18),
+              label: const Text(
+                '구독하기',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+              ),
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFF2E5B8A),
+                foregroundColor: Colors.white,
+                minimumSize: const Size(220, 48),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(28),
                 ),
               ),
-              const SizedBox(height: 12),
-              Text(
-                '결제 완료 후 앱으로 돌아오면 자동으로 잠금이 해제됩니다.',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 17 / 2,
-                  color: Colors.grey.shade400,
-                  height: 1.4,
-                ),
-              ),
-              const SizedBox(height: 16),
-              Container(
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(
-                    color: Colors.white.withValues(alpha: 0.16),
-                  ),
-                  color: Colors.white.withValues(alpha: 0.02),
-                ),
-                child: Column(
-                  children: [
-                    _PlanOptionTile(
-                      selected: isMonthly,
-                      label: monthlyText(),
-                      onTap: () => setState(
-                        () => _selectedProductId = 'premium_monthly',
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    _PlanOptionTile(
-                      selected: !isMonthly,
-                      label: yearlyText(),
-                      onTap: () =>
-                          setState(() => _selectedProductId = 'premium_yearly'),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 16),
-              SizedBox(
-                width: 220,
-                child: FilledButton.icon(
-                  onPressed: isPending
-                      ? null
-                      : () async {
-                          final ok = await notifier.buyNonConsumable(
-                            _selectedProductId,
-                          );
-                          if (!ok && context.mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('결제를 시작하지 못했습니다.')),
-                            );
-                          }
-                        },
-                  icon: const Icon(Icons.verified_rounded, size: 18),
-                  label: Text(
-                    actionText,
-                    style: const TextStyle(
-                      fontSize: 32 / 2,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: const Color(0xFF2E5B8A),
-                    foregroundColor: Colors.white,
-                    minimumSize: const Size(220, 48),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(28),
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 4),
-            ],
+            ),
           ),
-        ),
-      ],
+          const SizedBox(height: 4),
+        ],
+      ),
     );
 
     return ListView(
@@ -2486,12 +2452,17 @@ class _PlanOptionTile extends StatelessWidget {
                 : Colors.white.withValues(alpha: 0.2),
           ),
         ),
-        child: Text(
-          label,
-          style: TextStyle(
-            fontSize: 35 / 2,
-            fontWeight: FontWeight.w800,
-            color: selected ? Colors.amber : Colors.white,
+        child: FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerLeft,
+          child: Text(
+            label,
+            maxLines: 1,
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w800,
+              color: selected ? Colors.amber : Colors.white,
+            ),
           ),
         ),
       ),

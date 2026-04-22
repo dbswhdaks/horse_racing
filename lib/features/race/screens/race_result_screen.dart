@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/constants/api_constants.dart';
+import '../../../core/constants/iap_constants.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/in_app_webview_screen.dart';
 import '../../../core/widgets/shimmer_loading.dart';
@@ -43,10 +44,9 @@ class RaceResultScreen extends ConsumerWidget {
     final purchasedProductIds = ref.watch(
       inAppPurchaseProvider.select((state) => state.purchasedProductIds),
     );
-    final canViewPredictionRemark =
-        purchasedProductIds.contains('premium_daily') ||
-        purchasedProductIds.contains('premium_monthly') ||
-        purchasedProductIds.contains('premium_yearly');
+    final canViewPredictionRemark = purchasedProductIds.any(
+      IapConstants.subscriptionProductIds.contains,
+    );
     final canViewPredictionComparison = canViewPredictionRemark;
     final meetName = ApiConstants.meetNames[meet] ?? meet;
 
@@ -517,19 +517,6 @@ class _AiComparisonLockedCard extends StatelessWidget {
                 fontWeight: FontWeight.w700,
                 color: Colors.grey.shade200,
               ),
-            ),
-          ),
-          FilledButton(
-            onPressed: () => context.push('/entry/$meet/$date/$raceNo?tab=ai'),
-            style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFF2E5B8A),
-              foregroundColor: Colors.white,
-              minimumSize: const Size(84, 34),
-              padding: const EdgeInsets.symmetric(horizontal: 10),
-            ),
-            child: const Text(
-              '구독하기',
-              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
             ),
           ),
         ],
