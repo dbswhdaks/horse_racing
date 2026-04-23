@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../core/constants/iap_constants.dart';
@@ -85,6 +86,7 @@ class InAppPurchaseNotifier extends StateNotifier<InAppPurchaseState> {
   Timer? _entitlementRefreshTimer;
 
   static const _entitlementRefreshInterval = Duration(minutes: 5);
+  static const _entitlementExpiryKeyPrefix = 'iap_entitlement_expiry_';
 
   void _log(String message) {
     if (kDebugMode) {
@@ -95,6 +97,7 @@ class InAppPurchaseNotifier extends StateNotifier<InAppPurchaseState> {
   Future<void> initialize() async {
     _log('initialize() start');
     state = state.copyWith(isLoading: true, clearErrorMessage: true);
+    await _restoreEntitlementsFromLocalCache();
 
     final available = await _inAppPurchase.isAvailable();
     _log('store available: $available');
@@ -311,10 +314,13 @@ class InAppPurchaseNotifier extends StateNotifier<InAppPurchaseState> {
           final verification = await _verifyPurchase(purchase);
           if (verification.isEntitledNow) {
             _log('purchase verified: ${purchase.productID}');
-            _deliverProduct(purchase);
+            await _deliverProduct(
+              purchase,
+              verifiedExpiresAtUtc: verification.expiresAtUtc,
+            );
           } else {
             _log('purchase verification failed: ${purchase.productID}');
-            _revokeProduct(purchase.productID);
+            await _revokeProduct(purchase.productID);
             state = state.copyWith(
               errorMessage: verification.message ?? '결제 검증에 실패했습니다.',
               isPurchasePending: false,
@@ -355,10 +361,25 @@ class InAppPurchaseNotifier extends StateNotifier<InAppPurchaseState> {
     final functionName = IapConstants.serverVerifyFunctionName.trim();
     if (functionName.isEmpty) {
       _log('server verify function not configured, fallback to local check');
-      return const _PurchaseVerificationResult(
+      final expiresAtUtc = _calculateLocalSubscriptionExpiresAtUtc(
+        productId: purchase.productID,
+        transactionDate: purchase.transactionDate,
+      );
+      if (expiresAtUtc == null) {
+        return _PurchaseVerificationResult(
+          isValid: false,
+          isActive: false,
+          message: '구독 만료일 계산에 실패했습니다. 상품 정보를 확인해 주세요.',
+        );
+      }
+      final isActive = expiresAtUtc.isAfter(DateTime.now().toUtc());
+      return _PurchaseVerificationResult(
         isValid: true,
-        isActive: true,
-        message: '로컬 검증으로 처리되었습니다. 운영에서는 서버 검증을 활성화하세요.',
+        isActive: isActive,
+        expiresAtUtc: expiresAtUtc,
+        message: isActive
+            ? '로컬 검증으로 처리되었습니다.'
+            : '구독 기간이 만료되었습니다. 다시 구독해 주세요.',
       );
     }
 
@@ -391,8 +412,23 @@ class InAppPurchaseNotifier extends StateNotifier<InAppPurchaseState> {
       final expiresAtUtc = _parseDateTimeUtc(
         payload['expiresAt'] ?? payload['expires_at'] ?? payload['expiryTime'],
       );
+      if (!isValid) {
+        return _PurchaseVerificationResult(
+          isValid: false,
+          isActive: false,
+          message: payload['message']?.toString() ?? '서버 검증에 실패했습니다.',
+        );
+      }
+      if (expiresAtUtc == null) {
+        return const _PurchaseVerificationResult(
+          isValid: false,
+          isActive: false,
+          message:
+              '서버 검증 응답에 구독 만료일(expiresAt)이 없습니다. 서버 설정을 확인해 주세요.',
+        );
+      }
       final isActiveByTime =
-          expiresAtUtc == null || expiresAtUtc.isAfter(DateTime.now().toUtc());
+          expiresAtUtc.isAfter(DateTime.now().toUtc());
       final message =
           payload['message']?.toString() ?? payload['reason']?.toString();
 
@@ -451,6 +487,60 @@ class InAppPurchaseNotifier extends StateNotifier<InAppPurchaseState> {
     return parsed?.toUtc();
   }
 
+  DateTime? _calculateLocalSubscriptionExpiresAtUtc({
+    required String productId,
+    required String? transactionDate,
+  }) {
+    final purchasedAtUtc = _parsePurchaseDateUtc(transactionDate);
+    if (purchasedAtUtc == null) return null;
+
+    switch (productId) {
+      case 'premium_monthly':
+        return _addMonthsUtc(purchasedAtUtc, 1);
+      case 'premium_yearly':
+        return _addMonthsUtc(purchasedAtUtc, 12);
+      default:
+        return null;
+    }
+  }
+
+  DateTime? _parsePurchaseDateUtc(String? value) {
+    if (value == null) return null;
+    final text = value.trim();
+    if (text.isEmpty) return null;
+
+    final epoch = int.tryParse(text);
+    if (epoch != null) {
+      final isSeconds = text.length <= 10;
+      return DateTime.fromMillisecondsSinceEpoch(
+        isSeconds ? epoch * 1000 : epoch,
+        isUtc: true,
+      );
+    }
+
+    final parsed = DateTime.tryParse(text);
+    return parsed?.toUtc();
+  }
+
+  DateTime _addMonthsUtc(DateTime baseUtc, int months) {
+    final totalMonths = (baseUtc.month - 1) + months;
+    final year = baseUtc.year + (totalMonths ~/ 12);
+    final month = (totalMonths % 12) + 1;
+    final lastDayOfMonth = DateTime.utc(year, month + 1, 0).day;
+    final day = baseUtc.day > lastDayOfMonth ? lastDayOfMonth : baseUtc.day;
+
+    return DateTime.utc(
+      year,
+      month,
+      day,
+      baseUtc.hour,
+      baseUtc.minute,
+      baseUtc.second,
+      baseUtc.millisecond,
+      baseUtc.microsecond,
+    );
+  }
+
   void _startEntitlementRefreshTimer() {
     _entitlementRefreshTimer?.cancel();
     _entitlementRefreshTimer = Timer.periodic(
@@ -463,8 +553,9 @@ class InAppPurchaseNotifier extends StateNotifier<InAppPurchaseState> {
     );
   }
 
-  void _revokeProduct(String productId) {
+  Future<void> _revokeProduct(String productId) async {
     final updated = {...state.purchasedProductIds}..remove(productId);
+    await _clearCachedEntitlement(productId);
     state = state.copyWith(purchasedProductIds: updated);
   }
 
@@ -472,10 +563,22 @@ class InAppPurchaseNotifier extends StateNotifier<InAppPurchaseState> {
     return IapConstants.subscriptionProductIds.contains(productId);
   }
 
-  void _deliverProduct(PurchaseDetails purchase) {
+  Future<void> _deliverProduct(
+    PurchaseDetails purchase, {
+    DateTime? verifiedExpiresAtUtc,
+  }) async {
     if (!_isPremiumProductId(purchase.productID)) {
       _log('skip deliver - unknown productId: ${purchase.productID}');
       return;
+    }
+    final expiresAtUtc = _resolveEntitlementExpiryUtc(
+      purchase: purchase,
+      verifiedExpiresAtUtc: verifiedExpiresAtUtc,
+    );
+    if (expiresAtUtc == null) {
+      _log('skip cache - no entitlement expiry: ${purchase.productID}');
+    } else {
+      await _cacheEntitlement(purchase.productID, expiresAtUtc);
     }
     final purchased = {...state.purchasedProductIds, purchase.productID};
     _log('deliverProduct: ${purchase.productID}');
@@ -484,6 +587,71 @@ class InAppPurchaseNotifier extends StateNotifier<InAppPurchaseState> {
       isPurchasePending: false,
       clearErrorMessage: true,
     );
+  }
+
+  DateTime? _resolveEntitlementExpiryUtc({
+    required PurchaseDetails purchase,
+    required DateTime? verifiedExpiresAtUtc,
+  }) {
+    if (verifiedExpiresAtUtc != null) return verifiedExpiresAtUtc.toUtc();
+    return _calculateLocalSubscriptionExpiresAtUtc(
+      productId: purchase.productID,
+      transactionDate: purchase.transactionDate,
+    );
+  }
+
+  Future<void> _restoreEntitlementsFromLocalCache() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final nowUtc = DateTime.now().toUtc();
+      final active = <String>{};
+
+      for (final productId in IapConstants.subscriptionProductIds) {
+        final key = '$_entitlementExpiryKeyPrefix$productId';
+        final raw = prefs.getString(key);
+        if (raw == null || raw.isEmpty) continue;
+        final expiresAtUtc = DateTime.tryParse(raw)?.toUtc();
+        if (expiresAtUtc == null) {
+          await prefs.remove(key);
+          continue;
+        }
+        if (expiresAtUtc.isAfter(nowUtc)) {
+          active.add(productId);
+        } else {
+          await prefs.remove(key);
+        }
+      }
+
+      if (active.isNotEmpty) {
+        _log('restored local entitlement: ${active.join(', ')}');
+        state = state.copyWith(purchasedProductIds: active);
+      }
+    } catch (error) {
+      _log('restore local entitlement failed: $error');
+    }
+  }
+
+  Future<void> _cacheEntitlement(
+    String productId,
+    DateTime expiresAtUtc,
+  ) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final key = '$_entitlementExpiryKeyPrefix$productId';
+      await prefs.setString(key, expiresAtUtc.toUtc().toIso8601String());
+    } catch (error) {
+      _log('cache entitlement failed: $error');
+    }
+  }
+
+  Future<void> _clearCachedEntitlement(String productId) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final key = '$_entitlementExpiryKeyPrefix$productId';
+      await prefs.remove(key);
+    } catch (error) {
+      _log('clear cached entitlement failed: $error');
+    }
   }
 
   @override

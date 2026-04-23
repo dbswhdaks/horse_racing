@@ -2259,7 +2259,10 @@ class _PremiumSubscribeInlineCta extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     void moveToSubscription() {
-      context.push('/subscription?plan=premium_monthly');
+      final returnTo = Uri.encodeComponent(
+        GoRouterState.of(context).uri.toString(),
+      );
+      context.push('/subscription?plan=premium_monthly&returnTo=$returnTo');
     }
 
     return Container(
@@ -2397,7 +2400,14 @@ class _PremiumSubscriptionPaywallState
           SizedBox(
             width: 220,
             child: FilledButton.icon(
-              onPressed: () => context.push('/subscription?plan=$_selectedProductId'),
+              onPressed: () {
+                final returnTo = Uri.encodeComponent(
+                  GoRouterState.of(context).uri.toString(),
+                );
+                context.push(
+                  '/subscription?plan=$_selectedProductId&returnTo=$returnTo',
+                );
+              },
               icon: const Icon(Icons.verified_rounded, size: 18),
               label: const Text(
                 '구독하기',

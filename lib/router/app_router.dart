@@ -62,6 +62,7 @@ final appRouter = GoRouter(
             state.uri.queryParameters['plan'] == 'premium_yearly'
             ? 'premium_yearly'
             : 'premium_monthly',
+        returnToPath: state.uri.queryParameters['returnTo'],
       ),
     ),
   ],

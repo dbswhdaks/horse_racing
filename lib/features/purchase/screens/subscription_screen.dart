@@ -1,13 +1,20 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../../core/constants/iap_constants.dart';
 import '../providers/in_app_purchase_provider.dart';
 
 class SubscriptionScreen extends ConsumerStatefulWidget {
-  const SubscriptionScreen({super.key, this.initialProductId = 'premium_monthly'});
+  const SubscriptionScreen({
+    super.key,
+    this.initialProductId = 'premium_monthly',
+    this.returnToPath,
+  });
 
   final String initialProductId;
+  final String? returnToPath;
 
   @override
   ConsumerState<SubscriptionScreen> createState() => _SubscriptionScreenState();
@@ -16,6 +23,32 @@ class SubscriptionScreen extends ConsumerStatefulWidget {
 class _SubscriptionScreenState extends ConsumerState<SubscriptionScreen> {
   late String _selectedProductId;
   String _selectedPaymentMethod = '신용/체크카드';
+  ProviderSubscription<InAppPurchaseState>? _iapListener;
+  bool _hasHandledPurchaseNavigation = false;
+
+  bool _hasAnySubscription(Set<String> productIds) {
+    return productIds.any(IapConstants.subscriptionProductIds.contains);
+  }
+
+  void _navigateAfterPurchase() {
+    if (!mounted || _hasHandledPurchaseNavigation) return;
+    _hasHandledPurchaseNavigation = true;
+
+    final returnToPath = widget.returnToPath?.trim();
+    if (returnToPath != null &&
+        returnToPath.startsWith('/') &&
+        !returnToPath.startsWith('/subscription')) {
+      context.go(returnToPath);
+      return;
+    }
+
+    if (context.canPop()) {
+      context.pop(true);
+      return;
+    }
+
+    context.go('/');
+  }
 
   @override
   void initState() {
@@ -23,6 +56,24 @@ class _SubscriptionScreenState extends ConsumerState<SubscriptionScreen> {
     _selectedProductId = widget.initialProductId == 'premium_yearly'
         ? 'premium_yearly'
         : 'premium_monthly';
+    _iapListener = ref.listenManual<InAppPurchaseState>(
+      inAppPurchaseProvider,
+      (previous, next) {
+        final hadSubscription = _hasAnySubscription(
+          previous?.purchasedProductIds ?? const {},
+        );
+        final hasSubscription = _hasAnySubscription(next.purchasedProductIds);
+        if (!hadSubscription && hasSubscription) {
+          _navigateAfterPurchase();
+        }
+      },
+    );
+  }
+
+  @override
+  void dispose() {
+    _iapListener?.close();
+    super.dispose();
   }
 
   Future<void> _openPlayPaymentMethods(BuildContext context) async {
@@ -80,9 +131,7 @@ class _SubscriptionScreenState extends ConsumerState<SubscriptionScreen> {
     final isMonthly = _selectedProductId == 'premium_monthly';
     final isPending = iapState.isPurchasePending;
     final actionText = isMonthly ? '월간 구독 결제' : '연간 구독 결제';
-    final hasSubscription = iapState.purchasedProductIds.any(
-      (id) => id == 'premium_monthly' || id == 'premium_yearly',
-    );
+    final hasSubscription = _hasAnySubscription(iapState.purchasedProductIds);
 
     String formatPriceSpacing(String raw) {
       return raw.replaceAllMapped(
