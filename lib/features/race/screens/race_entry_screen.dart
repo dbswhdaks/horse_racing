@@ -2258,12 +2258,7 @@ class _PremiumSubscribeInlineCta extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    void moveToSubscription() {
-      final returnTo = Uri.encodeComponent(
-        GoRouterState.of(context).uri.toString(),
-      );
-      context.push('/subscription?plan=premium_monthly&returnTo=$returnTo');
-    }
+    void moveToProfile() => context.push('/profile');
 
     return Container(
       margin: const EdgeInsets.fromLTRB(12, 6, 12, 8),
@@ -2298,7 +2293,7 @@ class _PremiumSubscribeInlineCta extends StatelessWidget {
           const SizedBox(height: 10),
           Center(
             child: FilledButton(
-              onPressed: moveToSubscription,
+              onPressed: moveToProfile,
               style: FilledButton.styleFrom(
                 backgroundColor: const Color(0xFF2E5B8A),
                 foregroundColor: Colors.white,
@@ -2306,7 +2301,7 @@ class _PremiumSubscribeInlineCta extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(horizontal: 12),
               ),
               child: Text(
-                '구독하기',
+                '프로필로 이동',
                 style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
               ),
             ),
@@ -2400,17 +2395,10 @@ class _PremiumSubscriptionPaywallState
           SizedBox(
             width: 220,
             child: FilledButton.icon(
-              onPressed: () {
-                final returnTo = Uri.encodeComponent(
-                  GoRouterState.of(context).uri.toString(),
-                );
-                context.push(
-                  '/subscription?plan=$_selectedProductId&returnTo=$returnTo',
-                );
-              },
+              onPressed: () => context.push('/profile'),
               icon: const Icon(Icons.verified_rounded, size: 18),
               label: const Text(
-                '구독하기',
+                '프로필로 이동',
                 style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
               ),
               style: FilledButton.styleFrom(

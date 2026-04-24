@@ -1,12 +1,14 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:share_plus/share_plus.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/shimmer_loading.dart';
+import '../../../models/race.dart';
 import '../../race/providers/race_providers.dart';
 import '../widgets/race_card.dart';
 
@@ -73,6 +75,20 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                     icon: const Icon(Icons.share_rounded),
                     tooltip: '공유하기',
                     onPressed: () => _share(dateStr),
+                    padding: EdgeInsets.zero,
+                    visualDensity: VisualDensity.compact,
+                    constraints: const BoxConstraints(
+                      minWidth: 36,
+                      minHeight: 36,
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(top: 24, right: 8),
+                  child: IconButton(
+                    icon: const Icon(Icons.account_circle_outlined),
+                    tooltip: '프로필',
+                    onPressed: () => context.push('/profile'),
                     padding: EdgeInsets.zero,
                     visualDensity: VisualDensity.compact,
                     constraints: const BoxConstraints(
@@ -250,6 +266,25 @@ class _RaceListTabState extends ConsumerState<_RaceListTab> {
     setState(() => _lastUpdated = DateTime.now());
   }
 
+  void _prefetchEntryData(Race race) {
+    final entryParams = (
+      meet: race.meet,
+      date: race.raceDate,
+      raceNo: race.raceNo,
+    );
+    unawaited(ref.read(raceStartListProvider(entryParams).future));
+    unawaited(ref.read(oddsProvider(entryParams).future));
+    unawaited(ref.read(predictionProvider(entryParams).future));
+    unawaited(
+      ref.read(racePlanProvider((meet: race.meet, date: race.raceDate)).future),
+    );
+  }
+
+  void _openEntryDetail(Race race, BuildContext context) {
+    _prefetchEntryData(race);
+    context.push('/entry/${race.meet}/${race.raceDate}/${race.raceNo}');
+  }
+
   @override
   Widget build(BuildContext context) {
     final selectedDate = ref.watch(selectedDateProvider);
@@ -279,8 +314,8 @@ class _RaceListTabState extends ConsumerState<_RaceListTab> {
         return RefreshIndicator(
           onRefresh: () async => _refresh(),
           child: ListView.builder(
-            padding: const EdgeInsets.fromLTRB(0, 4, 0, 24),
-            itemCount: races.length + 2,
+            padding: const EdgeInsets.fromLTRB(0, 4, 0, 12),
+            itemCount: races.length + 1,
             itemBuilder: (context, index) {
               if (index == 0) {
                 return _UpdateButton(
@@ -288,17 +323,12 @@ class _RaceListTabState extends ConsumerState<_RaceListTab> {
                   onTap: _refresh,
                 );
               }
-              if (index == races.length + 1) {
-                return const _ManageSubscriptionButton();
-              }
               final race = races[index - 1];
               final actualHeadCount = headCounts[race.raceNo] ?? race.headCount;
               return RaceCard(
                 race: race,
                 headCount: actualHeadCount,
-                onTap: () => context.push(
-                  '/entry/${race.meet}/${race.raceDate}/${race.raceNo}',
-                ),
+                onTap: () => _openEntryDetail(race, context),
                 onResultTap: () => context.push(
                   '/result/${race.meet}/${race.raceDate}/${race.raceNo}',
                 ),
@@ -307,53 +337,6 @@ class _RaceListTabState extends ConsumerState<_RaceListTab> {
           ),
         );
       },
-    );
-  }
-}
-
-class _ManageSubscriptionButton extends StatelessWidget {
-  const _ManageSubscriptionButton();
-
-  Future<void> _openSubscriptionManagePage(BuildContext context) async {
-    final uri = Uri.parse(
-      'https://play.google.com/store/account/subscriptions?package=com.horseracingplus.app',
-    );
-
-    if (!await launchUrl(uri, mode: LaunchMode.externalApplication) &&
-        context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('구독 관리 페이지를 열 수 없습니다.')),
-      );
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 6, 12, 4),
-      child: Row(
-        children: [
-          const Spacer(),
-          OutlinedButton(
-            onPressed: () => _openSubscriptionManagePage(context),
-            style: OutlinedButton.styleFrom(
-              side: BorderSide(color: Colors.grey.shade600),
-              foregroundColor: Colors.grey.shade300,
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              minimumSize: const Size(0, 32),
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            ),
-            child: Text(
-              '구독 취소',
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                color: Colors.grey.shade300,
-              ),
-            ),
-          ),
-        ],
-      ),
     );
   }
 }

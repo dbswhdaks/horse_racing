@@ -8,6 +8,20 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../core/constants/iap_constants.dart';
 
+class SubscriptionEntitlement {
+  const SubscriptionEntitlement({
+    required this.productId,
+    required this.expiresAtUtc,
+    this.startedAtUtc,
+    this.orderId,
+  });
+
+  final String productId;
+  final DateTime? startedAtUtc;
+  final DateTime expiresAtUtc;
+  final String? orderId;
+}
+
 class InAppPurchaseState {
   const InAppPurchaseState({
     this.isAvailable = false,
@@ -16,6 +30,7 @@ class InAppPurchaseState {
     this.products = const [],
     this.notFoundProductIds = const [],
     this.purchasedProductIds = const {},
+    this.entitlementByProductId = const {},
     this.isRestoring = false,
     this.errorMessage,
   });
@@ -26,6 +41,7 @@ class InAppPurchaseState {
   final List<ProductDetails> products;
   final List<String> notFoundProductIds;
   final Set<String> purchasedProductIds;
+  final Map<String, SubscriptionEntitlement> entitlementByProductId;
   final bool isRestoring;
   final String? errorMessage;
 
@@ -36,6 +52,7 @@ class InAppPurchaseState {
     List<ProductDetails>? products,
     List<String>? notFoundProductIds,
     Set<String>? purchasedProductIds,
+    Map<String, SubscriptionEntitlement>? entitlementByProductId,
     bool? isRestoring,
     String? errorMessage,
     bool clearErrorMessage = false,
@@ -47,6 +64,8 @@ class InAppPurchaseState {
       products: products ?? this.products,
       notFoundProductIds: notFoundProductIds ?? this.notFoundProductIds,
       purchasedProductIds: purchasedProductIds ?? this.purchasedProductIds,
+      entitlementByProductId:
+          entitlementByProductId ?? this.entitlementByProductId,
       isRestoring: isRestoring ?? this.isRestoring,
       errorMessage: clearErrorMessage
           ? null
@@ -87,6 +106,8 @@ class InAppPurchaseNotifier extends StateNotifier<InAppPurchaseState> {
 
   static const _entitlementRefreshInterval = Duration(minutes: 5);
   static const _entitlementExpiryKeyPrefix = 'iap_entitlement_expiry_';
+  static const _entitlementStartKeyPrefix = 'iap_entitlement_start_';
+  static const _entitlementOrderIdKeyPrefix = 'iap_entitlement_order_id_';
 
   void _log(String message) {
     if (kDebugMode) {
@@ -163,7 +184,10 @@ class InAppPurchaseNotifier extends StateNotifier<InAppPurchaseState> {
     if (!state.isAvailable) return;
     state = state.copyWith(isRestoring: true, clearErrorMessage: true);
     if (clearExisting) {
-      state = state.copyWith(purchasedProductIds: const {});
+      state = state.copyWith(
+        purchasedProductIds: const {},
+        entitlementByProductId: const {},
+      );
     }
     try {
       await _inAppPurchase.restorePurchases();
@@ -194,6 +218,11 @@ class InAppPurchaseNotifier extends StateNotifier<InAppPurchaseState> {
     String preferredProductId = 'premium_monthly',
   }) async {
     _log('startSubscriptionPurchase() requested: $preferredProductId');
+    if (_hasActiveSubscription()) {
+      _log('active subscription already exists, skip repurchase flow');
+      state = state.copyWith(isPurchasePending: false, clearErrorMessage: true);
+      return true;
+    }
 
     if (!state.isAvailable) {
       _log('store unavailable before purchase, re-initialize');
@@ -541,6 +570,24 @@ class InAppPurchaseNotifier extends StateNotifier<InAppPurchaseState> {
     );
   }
 
+  DateTime _subtractMonthsUtc(DateTime baseUtc, int months) {
+    return _addMonthsUtc(baseUtc, -months);
+  }
+
+  DateTime? _deriveSubscriptionStartUtc({
+    required String productId,
+    required DateTime expiresAtUtc,
+  }) {
+    switch (productId) {
+      case 'premium_monthly':
+        return _subtractMonthsUtc(expiresAtUtc, 1);
+      case 'premium_yearly':
+        return _subtractMonthsUtc(expiresAtUtc, 12);
+      default:
+        return null;
+    }
+  }
+
   void _startEntitlementRefreshTimer() {
     _entitlementRefreshTimer?.cancel();
     _entitlementRefreshTimer = Timer.periodic(
@@ -556,11 +603,22 @@ class InAppPurchaseNotifier extends StateNotifier<InAppPurchaseState> {
   Future<void> _revokeProduct(String productId) async {
     final updated = {...state.purchasedProductIds}..remove(productId);
     await _clearCachedEntitlement(productId);
-    state = state.copyWith(purchasedProductIds: updated);
+    final updatedEntitlements = {...state.entitlementByProductId}
+      ..remove(productId);
+    state = state.copyWith(
+      purchasedProductIds: updated,
+      entitlementByProductId: updatedEntitlements,
+    );
   }
 
   bool _isPremiumProductId(String productId) {
     return IapConstants.subscriptionProductIds.contains(productId);
+  }
+
+  bool _hasActiveSubscription() {
+    return state.purchasedProductIds.any(
+      IapConstants.subscriptionProductIds.contains,
+    );
   }
 
   Future<void> _deliverProduct(
@@ -578,7 +636,27 @@ class InAppPurchaseNotifier extends StateNotifier<InAppPurchaseState> {
     if (expiresAtUtc == null) {
       _log('skip cache - no entitlement expiry: ${purchase.productID}');
     } else {
-      await _cacheEntitlement(purchase.productID, expiresAtUtc);
+      final startedAtUtc =
+          _parsePurchaseDateUtc(purchase.transactionDate) ??
+          _deriveSubscriptionStartUtc(
+            productId: purchase.productID,
+            expiresAtUtc: expiresAtUtc,
+          );
+      final orderId = purchase.purchaseID?.trim();
+      await _cacheEntitlement(
+        productId: purchase.productID,
+        expiresAtUtc: expiresAtUtc,
+        startedAtUtc: startedAtUtc,
+        orderId: (orderId == null || orderId.isEmpty) ? null : orderId,
+      );
+      final updatedEntitlements = {...state.entitlementByProductId}
+        ..[purchase.productID] = SubscriptionEntitlement(
+          productId: purchase.productID,
+          startedAtUtc: startedAtUtc,
+          expiresAtUtc: expiresAtUtc,
+          orderId: (orderId == null || orderId.isEmpty) ? null : orderId,
+        );
+      state = state.copyWith(entitlementByProductId: updatedEntitlements);
     }
     final purchased = {...state.purchasedProductIds, purchase.productID};
     _log('deliverProduct: ${purchase.productID}');
@@ -605,26 +683,52 @@ class InAppPurchaseNotifier extends StateNotifier<InAppPurchaseState> {
       final prefs = await SharedPreferences.getInstance();
       final nowUtc = DateTime.now().toUtc();
       final active = <String>{};
+      final activeEntitlements = <String, SubscriptionEntitlement>{};
 
       for (final productId in IapConstants.subscriptionProductIds) {
-        final key = '$_entitlementExpiryKeyPrefix$productId';
-        final raw = prefs.getString(key);
-        if (raw == null || raw.isEmpty) continue;
-        final expiresAtUtc = DateTime.tryParse(raw)?.toUtc();
+        final expiryKey = '$_entitlementExpiryKeyPrefix$productId';
+        final startKey = '$_entitlementStartKeyPrefix$productId';
+        final orderIdKey = '$_entitlementOrderIdKeyPrefix$productId';
+        final rawExpiry = prefs.getString(expiryKey);
+        if (rawExpiry == null || rawExpiry.isEmpty) continue;
+        final expiresAtUtc = DateTime.tryParse(rawExpiry)?.toUtc();
         if (expiresAtUtc == null) {
-          await prefs.remove(key);
+          await prefs.remove(expiryKey);
+          await prefs.remove(startKey);
+          await prefs.remove(orderIdKey);
           continue;
         }
         if (expiresAtUtc.isAfter(nowUtc)) {
           active.add(productId);
+          final rawStart = prefs.getString(startKey);
+          final rawOrderId = prefs.getString(orderIdKey);
+          final startedAtUtc =
+              DateTime.tryParse(rawStart ?? '')?.toUtc() ??
+              _deriveSubscriptionStartUtc(
+                productId: productId,
+                expiresAtUtc: expiresAtUtc,
+              );
+          activeEntitlements[productId] = SubscriptionEntitlement(
+            productId: productId,
+            startedAtUtc: startedAtUtc,
+            expiresAtUtc: expiresAtUtc,
+            orderId: rawOrderId == null || rawOrderId.isEmpty
+                ? null
+                : rawOrderId,
+          );
         } else {
-          await prefs.remove(key);
+          await prefs.remove(expiryKey);
+          await prefs.remove(startKey);
+          await prefs.remove(orderIdKey);
         }
       }
 
       if (active.isNotEmpty) {
         _log('restored local entitlement: ${active.join(', ')}');
-        state = state.copyWith(purchasedProductIds: active);
+        state = state.copyWith(
+          purchasedProductIds: active,
+          entitlementByProductId: activeEntitlements,
+        );
       }
     } catch (error) {
       _log('restore local entitlement failed: $error');
@@ -632,13 +736,29 @@ class InAppPurchaseNotifier extends StateNotifier<InAppPurchaseState> {
   }
 
   Future<void> _cacheEntitlement(
-    String productId,
-    DateTime expiresAtUtc,
+    {
+    required String productId,
+    required DateTime expiresAtUtc,
+    required DateTime? startedAtUtc,
+    required String? orderId,
+  }
   ) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final key = '$_entitlementExpiryKeyPrefix$productId';
-      await prefs.setString(key, expiresAtUtc.toUtc().toIso8601String());
+      final expiryKey = '$_entitlementExpiryKeyPrefix$productId';
+      final startKey = '$_entitlementStartKeyPrefix$productId';
+      final orderIdKey = '$_entitlementOrderIdKeyPrefix$productId';
+      await prefs.setString(expiryKey, expiresAtUtc.toUtc().toIso8601String());
+      if (startedAtUtc != null) {
+        await prefs.setString(startKey, startedAtUtc.toUtc().toIso8601String());
+      } else {
+        await prefs.remove(startKey);
+      }
+      if (orderId != null && orderId.isNotEmpty) {
+        await prefs.setString(orderIdKey, orderId);
+      } else {
+        await prefs.remove(orderIdKey);
+      }
     } catch (error) {
       _log('cache entitlement failed: $error');
     }
@@ -647,8 +767,12 @@ class InAppPurchaseNotifier extends StateNotifier<InAppPurchaseState> {
   Future<void> _clearCachedEntitlement(String productId) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final key = '$_entitlementExpiryKeyPrefix$productId';
-      await prefs.remove(key);
+      final expiryKey = '$_entitlementExpiryKeyPrefix$productId';
+      final startKey = '$_entitlementStartKeyPrefix$productId';
+      final orderIdKey = '$_entitlementOrderIdKeyPrefix$productId';
+      await prefs.remove(expiryKey);
+      await prefs.remove(startKey);
+      await prefs.remove(orderIdKey);
     } catch (error) {
       _log('clear cached entitlement failed: $error');
     }

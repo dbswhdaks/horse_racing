@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../features/home/screens/home_screen.dart';
-import '../features/purchase/screens/subscription_screen.dart';
+import '../features/profile/screens/profile_screen.dart';
 import '../features/race/screens/race_detail_screen.dart';
 import '../features/race/screens/race_entry_screen.dart';
 import '../features/race/screens/race_result_screen.dart';
@@ -55,16 +55,7 @@ final appRouter = GoRouter(
         raceNo: int.parse(state.pathParameters['raceNo']!),
       ),
     ),
-    GoRoute(
-      path: '/subscription',
-      builder: (context, state) => SubscriptionScreen(
-        initialProductId:
-            state.uri.queryParameters['plan'] == 'premium_yearly'
-            ? 'premium_yearly'
-            : 'premium_monthly',
-        returnToPath: state.uri.queryParameters['returnTo'],
-      ),
-    ),
+    GoRoute(path: '/profile', builder: (context, state) => const ProfileScreen()),
   ],
   errorBuilder: (context, state) =>
       Scaffold(body: Center(child: Text('페이지를 찾을 수 없습니다: ${state.error}'))),
