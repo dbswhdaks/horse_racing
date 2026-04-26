@@ -43,10 +43,11 @@ class PredictionScreen extends ConsumerWidget {
                 if (report == null) {
                   return SliverFillRemaining(child: _OfflineView());
                 }
-                final sorted = [
-                  ...report.predictions,
-                ]..sort((a, b) => b.winProbability.compareTo(a.winProbability));
-                final top3 = sorted.take(3).toList();
+                final byPlace = [...report.predictions]
+                  ..sort(Prediction.compareByPlaceThenWin);
+                final byWin = [...report.predictions]
+                  ..sort(Prediction.compareByWinThenPlace);
+                final top3Place = byPlace.take(3).toList();
 
                 return SliverFillRemaining(
                   hasScrollBody: true,
@@ -96,13 +97,13 @@ class PredictionScreen extends ConsumerWidget {
                                   _WinProbabilityChart(
                                     predictions: report.predictions,
                                   ),
-                                  const _SectionTitle('복승 확률'),
+                                  const _SectionTitle('복승(입상) 예측'),
                                   _PlaceProbabilityChart(
                                     predictions: report.predictions,
                                   ),
-                                  if (top3.isNotEmpty) ...[
-                                    const _SectionTitle('종합 추천 TOP 3'),
-                                    ...top3.map(
+                                  if (top3Place.isNotEmpty) ...[
+                                    const _SectionTitle('입상권·추천 TOP 3'),
+                                    ...top3Place.map(
                                       (p) =>
                                           _PredictionDetailCard(prediction: p),
                                     ),
@@ -112,8 +113,8 @@ class PredictionScreen extends ConsumerWidget {
                               ),
                               ListView(
                                 children: [
-                                  const _SectionTitle('AI 상세 분석'),
-                                  ...sorted.map(
+                                  const _SectionTitle('AI 상세 (승률순)'),
+                                  ...byWin.map(
                                     (p) => _PredictionDetailCard(prediction: p),
                                   ),
                                   const SizedBox(height: 24),

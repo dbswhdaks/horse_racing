@@ -1,0 +1,37 @@
+# KRA → Supabase 배당(odds) 백필 + 휴리스틱 predictions(1.1) 동기화
+# (주간 휴리스틱 튜닝: `scheduled-tune.yml`)
+# GitHub: Settings → Secrets → Actions 에 다음을 등록하세요.
+#   SUPABASE_URL, SUPABASE_SERVICE_KEY, KRA_SERVICE_KEY
+name: ops-sync
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    # UTC 01:00 ≈ KST 10:00
+    - cron: "0 1 * * *"
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r backend/requirements.txt
+
+      - name: Sync odds and predictions
+        working-directory: ${{ github.workspace }}
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          KRA_SERVICE_KEY: ${{ secrets.KRA_SERVICE_KEY }}
+        run: |
+          set -e
+          SINCE=$(date -d "14 days ago" +%Y%m%d)
+          echo "SINCE=$SINCE"
+          python backend/ops_sync.py odds --since "$SINCE" --max-races 400 --sleep 0.35
+          python backend/ops_sync.py predictions --since "$SINCE" --max-races 800 --model-version heuristic-place-1.1

@@ -217,7 +217,7 @@ class _AiTab extends StatelessWidget {
         }
 
         final sorted = [...report.predictions]
-          ..sort((a, b) => b.winProbability.compareTo(a.winProbability));
+          ..sort(Prediction.compareByWinThenPlace);
         final top3 = sorted.take(3).toList();
         final confidence = _confidence(sorted);
 
@@ -233,7 +233,7 @@ class _AiTab extends StatelessWidget {
             _SectionHeader(
               icon: Icons.emoji_events_rounded,
               iconColor: AppTheme.winColor,
-              title: '순위 예측',
+              title: 'AI 추천(승률순)',
               trailing: _ResultButton(
                 onTap: () => context.push('/result/$meet/$date/$raceNo'),
               ),
@@ -267,7 +267,7 @@ class _AiTab extends StatelessWidget {
   int _confidence(List<Prediction> sorted) {
     if (sorted.length < 2) return 70;
     final gap = sorted[0].winProbability - sorted[1].winProbability;
-    return (55 + gap * 2.5).clamp(50, 92).round();
+    return (55 + gap * 2.2).clamp(50, 92).round();
   }
 }
 
@@ -705,7 +705,7 @@ class _AiRankCard extends StatelessWidget {
             ClipRRect(
               borderRadius: BorderRadius.circular(2),
               child: LinearProgressIndicator(
-                value: (prediction.winProbability / 30).clamp(0, 1),
+                value: (prediction.winProbability / 100).clamp(0, 1),
                 minHeight: 4,
                 backgroundColor: Colors.transparent,
                 valueColor: const AlwaysStoppedAnimation(Color(0xFF00C853)),
@@ -771,7 +771,7 @@ class _BettingSection extends StatelessWidget {
     final tags = p.tags.take(2).join(' · ');
     return tags.isNotEmpty
         ? tags
-        : '승률 ${p.winProbability.toStringAsFixed(1)}%';
+        : '입상 ${p.placeProbability.toStringAsFixed(1)}%';
   }
 }
 
@@ -1279,11 +1279,21 @@ List<_Candidate> _buildRanked(
     final pred = predByNo[e.horseNo];
     final winOdds = oddsByNo[e.horseNo] ?? 0;
     final predScore = pred?.winProbability ?? 0;
+    final placeScore = pred?.placeProbability ?? 0;
     final oddsScore = winOdds > 0 ? (100 / winOdds).clamp(0, 100) : 0.0;
     final formScore = e.rating > 0
         ? e.rating.clamp(0, 100)
         : (e.winRate * 2.3).clamp(0, 100);
-    final score = predScore * 0.55 + oddsScore * 0.2 + formScore * 0.25;
+    // 종합출주: 입상(3위권) 위주 — 승률 가중 ↓, 입상 가중 ↑
+    final score =
+        predScore * 0.22 +
+        placeScore * 0.48 +
+        oddsScore * 0.15 +
+        formScore * 0.15;
     return _Candidate(entry: e, score: score);
-  }).toList()..sort((a, b) => b.score.compareTo(a.score));
+  }).toList()..sort((a, b) {
+    final scoreCompare = b.score.compareTo(a.score);
+    if (scoreCompare != 0) return scoreCompare;
+    return a.entry.horseNo.compareTo(b.entry.horseNo);
+  });
 }

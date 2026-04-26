@@ -1,0 +1,36 @@
+{
+  "generated_at": "2026-04-26T20:40:19.347000",
+  "filters": {
+    "meet": null,
+    "since": null,
+    "max_races": 800,
+    "trials": 3000,
+    "seed": 7
+  },
+  "metrics": {
+    "objective": 0.582663,
+    "top1_acc": 0.336957,
+    "top3_match": 0.532609,
+    "top3_winner": 0.766304,
+    "brier": 0.140762,
+    "races": 184
+  },
+  "objective_weights": {
+    "top1_acc": 0.5,
+    "top3_match": 0.3,
+    "top3_winner": 0.12,
+    "brier": 0.08
+  },
+  "best_params": {
+    "w_rating": 0.324359,
+    "w_perf": 0.371729,
+    "w_class_form": 0.02035,
+    "w_pace": 0.005776,
+    "w_condition": 0.277786,
+    "w_market": 0.0,
+    "rating_pow": 2.614967,
+    "prior_weight": 7.375545,
+    "temp_scale": 1.595725,
+    "reliability_penalty": 0.174242
+  }
+}

@@ -24,16 +24,33 @@ class Prediction {
       jockeyName: json['jockey_name'] as String? ?? '',
       winProbability: (json['win_probability'] as num?)?.toDouble() ?? 0.0,
       placeProbability: (json['place_probability'] as num?)?.toDouble() ?? 0.0,
-      tags: (json['tags'] as List<dynamic>?)
-              ?.map((e) => e.toString())
-              .toList() ??
+      tags:
+          (json['tags'] as List<dynamic>?)?.map((e) => e.toString()).toList() ??
           [],
       featureImportance:
           (json['feature_importance'] as Map<String, dynamic>?)?.map(
-                (k, v) => MapEntry(k, (v as num).toDouble()),
-              ) ??
-              {},
+            (k, v) => MapEntry(k, (v as num).toDouble()),
+          ) ??
+          {},
     );
+  }
+
+  /// 1위(승률) 우선, 동률 시 입상 예측·마번 — **AI 추천** 탭
+  static int compareByWinThenPlace(Prediction a, Prediction b) {
+    final winCompare = b.winProbability.compareTo(a.winProbability);
+    if (winCompare != 0) return winCompare;
+    final placeCompare = b.placeProbability.compareTo(a.placeProbability);
+    if (placeCompare != 0) return placeCompare;
+    return a.horseNo.compareTo(b.horseNo);
+  }
+
+  /// 입상(연승) 쪽이 높을수록 먼저, 동률 시 승률 — **종합추천** 탭
+  static int compareByPlaceThenWin(Prediction a, Prediction b) {
+    final placeCompare = b.placeProbability.compareTo(a.placeProbability);
+    if (placeCompare != 0) return placeCompare;
+    final winCompare = b.winProbability.compareTo(a.winProbability);
+    if (winCompare != 0) return winCompare;
+    return a.horseNo.compareTo(b.horseNo);
   }
 }
 
@@ -62,13 +79,14 @@ class PredictionReport {
       raceDate: json['race_date'] as String? ?? '',
       meet: json['meet'] as String? ?? '',
       raceNo: json['race_no'] as int? ?? 0,
-      predictions: (json['predictions'] as List<dynamic>?)
+      predictions:
+          (json['predictions'] as List<dynamic>?)
               ?.map((e) => Prediction.fromJson(e as Map<String, dynamic>))
               .toList() ??
           [],
       modelVersion: json['model_version'] as String? ?? '',
-      generatedAt: DateTime.tryParse(json['generated_at'] ?? '') ??
-          DateTime.now(),
+      generatedAt:
+          DateTime.tryParse(json['generated_at'] ?? '') ?? DateTime.now(),
     );
   }
 }

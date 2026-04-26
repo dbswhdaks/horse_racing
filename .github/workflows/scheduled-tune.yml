@@ -1,0 +1,66 @@
+# 주간(또는 수동) 휴리스틱 가중치 튜닝 + JSON 아티팩트
+# Secrets: SUPABASE_URL, SUPABASE_SERVICE_KEY
+# 결과: Actions → 해당 실행 → Artifacts → heuristic_tuned_params.json 다운로드 → repo에 반영(PR) 가능
+name: scheduled-tune
+
+on:
+  workflow_dispatch:
+    inputs:
+      trials:
+        description: "튜닝 랜덤 탐색 횟수"
+        type: string
+        default: "500"
+      max_races:
+        description: "사용할 최대 경주 수"
+        type: string
+        default: "800"
+      sync_predictions:
+        description: "튜닝 후 Supabase predictions까지 업서트(1/0)"
+        type: string
+        default: "0"
+  schedule:
+    # 매주 일요일 UTC 03:00
+    - cron: "0 3 * * 0"
+
+jobs:
+  tune:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r backend/requirements.txt
+
+      - name: Run heuristic tuning
+        working-directory: ${{ github.workspace }}
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: |
+          set -e
+          # workflow_dispatch: 입력 / schedule: 기본값
+          TRIALS="${{ github.event.inputs.trials }}"
+          MAXR="${{ github.event.inputs.max_races }}"
+          SYNC="${{ github.event.inputs.sync_predictions }}"
+          if [ -z "$TRIALS" ] || [ "$TRIALS" = "null" ]; then TRIALS=500; fi
+          if [ -z "$MAXR" ] || [ "$MAXR" = "null" ]; then MAXR=800; fi
+          if [ -z "$SYNC" ] || [ "$SYNC" = "null" ]; then SYNC=0; fi
+          CMD=(python backend/tune_heuristic_predictions.py --trials "$TRIALS" --max-races "$MAXR" --output backend/models/heuristic_tuned_params.json)
+          if [ "$SYNC" = "1" ] || [ "$SYNC" = "true" ] || [ "$SYNC" = "yes" ]; then
+            CMD+=("--sync-predictions" "--model-version" "heuristic-place-1.1")
+          fi
+          echo "Running: ${CMD[*]}"
+          "${CMD[@]}"
+
+      - name: Upload tuning JSON
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: heuristic-tuned-params
+          path: backend/models/heuristic_tuned_params.json
+          if-no-files-found: warn

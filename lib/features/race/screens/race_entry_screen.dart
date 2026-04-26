@@ -47,7 +47,7 @@ class RaceEntryScreen extends ConsumerWidget {
     final purchasedProductIds = ref.watch(
       inAppPurchaseProvider.select((state) => state.purchasedProductIds),
     );
-    final canViewComprehensive = purchasedProductIds.any(
+    final canViewAiRecommendation = purchasedProductIds.any(
       IapConstants.subscriptionProductIds.contains,
     );
     final race = raceAsync.valueOrNull
@@ -147,14 +147,14 @@ class RaceEntryScreen extends ConsumerWidget {
                       entriesAsync,
                       oddsAsync,
                       predAsync,
-                      canViewComprehensive,
+                      canViewAiRecommendation,
                     ),
                     // ── AI 추천 탭 ──
                     _buildAiTab(
                       context,
                       entriesAsync,
                       predAsync,
-                      canViewComprehensive,
+                      canViewAiRecommendation,
                       iapState,
                     ),
                   ],
@@ -174,7 +174,7 @@ class RaceEntryScreen extends ConsumerWidget {
     AsyncValue<List<RaceEntry>> entriesAsync,
     AsyncValue<List<Odds>> oddsAsync,
     AsyncValue<PredictionReport?> predAsync,
-    bool canViewComprehensive,
+    bool canViewPacePreview,
   ) {
     return entriesAsync.when(
       loading: () => ListView(
@@ -212,6 +212,8 @@ class RaceEntryScreen extends ConsumerWidget {
         }
         final odds = oddsAsync.valueOrNull ?? [];
         final predictions = predAsync.valueOrNull?.predictions ?? [];
+        final predictionsByPlace = [...predictions]
+          ..sort(Prediction.compareByPlaceThenWin);
         final sorted = List<RaceEntry>.from(entries)
           ..sort((a, b) => a.horseNo.compareTo(b.horseNo));
         final distance = race?.distance ?? 0;
@@ -224,7 +226,7 @@ class RaceEntryScreen extends ConsumerWidget {
                 key: ValueKey('pick_${meet}_${date}_$raceNo'),
                 raceKey: '${meet}_${date}_$raceNo',
                 entries: entries,
-                predictions: predictions,
+                predictions: predictionsByPlace,
               ),
             ),
             const SliverToBoxAdapter(child: SizedBox(height: 20)),
@@ -232,13 +234,10 @@ class RaceEntryScreen extends ConsumerWidget {
             SliverToBoxAdapter(
               child: () {
                 if (entries.isEmpty) return const SizedBox.shrink();
-                if (!canViewComprehensive) {
-                  return const _PremiumSubscribeInlineCta();
-                }
                 return _ComprehensiveRecommendation(
                   raceKey: '${meet}_${date}_$raceNo',
                   entries: entries,
-                  predictions: predictions,
+                  predictions: predictionsByPlace,
                   odds: odds,
                   distance: race?.distance ?? 1400,
                 );
@@ -249,7 +248,7 @@ class RaceEntryScreen extends ConsumerWidget {
             SliverToBoxAdapter(
               child: () {
                 if (entries.isEmpty) return const SizedBox.shrink();
-                if (!canViewComprehensive) {
+                if (!canViewPacePreview) {
                   return const SizedBox.shrink();
                 }
                 return _RacePacePreview(
@@ -285,7 +284,10 @@ class RaceEntryScreen extends ConsumerWidget {
                 final entry = sorted[i];
                 final winOdds = _findWinOdds(odds, entry.horseNo);
                 final pred = _findPrediction(predictions, entry.horseNo);
-                final predRank = _predictionRank(predictions, entry.horseNo);
+                final predRank = _predictionRankByPlace(
+                  predictions,
+                  entry.horseNo,
+                );
                 return _HorseCard(
                   entry: entry,
                   winOdds: winOdds,
@@ -338,10 +340,10 @@ class RaceEntryScreen extends ConsumerWidget {
     BuildContext context,
     AsyncValue<List<RaceEntry>> entriesAsync,
     AsyncValue<PredictionReport?> predAsync,
-    bool canViewComprehensive,
+    bool canViewAiRecommendation,
     InAppPurchaseState iapState,
   ) {
-    if (!canViewComprehensive) {
+    if (!canViewAiRecommendation) {
       return _PremiumSubscriptionPaywall(iapState: iapState);
     }
 
@@ -387,12 +389,12 @@ class RaceEntryScreen extends ConsumerWidget {
         final entries = entriesAsync.valueOrNull ?? [];
         final meetName = ApiConstants.meetNames[meet] ?? meet;
         final sorted = [...report.predictions]
-          ..sort((a, b) => b.winProbability.compareTo(a.winProbability));
+          ..sort(Prediction.compareByWinThenPlace);
 
         final gap = sorted.length >= 2
             ? sorted[0].winProbability - sorted[1].winProbability
             : 0.0;
-        final confidence = (55 + gap * 2.5).clamp(50, 92).round();
+        final confidence = (55 + gap * 2.2).clamp(50, 92).round();
 
         return ListView(
           padding: const EdgeInsets.fromLTRB(14, 28, 14, 32),
@@ -481,7 +483,7 @@ class RaceEntryScreen extends ConsumerWidget {
 
             const SizedBox(height: 16),
 
-            // 순위 예측 헤더
+            // 승률(1착) 위주 — 리스트는 이미 compareByWinThenPlace
             Row(
               children: [
                 const Icon(
@@ -492,7 +494,7 @@ class RaceEntryScreen extends ConsumerWidget {
                 const SizedBox(width: 6),
                 const Expanded(
                   child: Text(
-                    '순위 예측',
+                    '승률·AI 추천',
                     style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
                   ),
                 ),
@@ -529,7 +531,7 @@ class RaceEntryScreen extends ConsumerWidget {
 
             const SizedBox(height: 10),
 
-            // 순위 예측 리스트
+            // 승률(우승) 강조 리스트
             ...sorted.asMap().entries.map((e) {
               final rank = e.key + 1;
               final pred = e.value;
@@ -792,7 +794,7 @@ class RaceEntryScreen extends ConsumerWidget {
                       ),
                     ),
                     Text(
-                      '${pred.winProbability.toStringAsFixed(1)}%',
+                      '${pred.placeProbability.toStringAsFixed(1)}%',
                       style: const TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.w900,
@@ -855,8 +857,8 @@ class RaceEntryScreen extends ConsumerWidget {
       parts.add('안정적인 등급');
     }
 
-    if (pred.winProbability >= 15) {
-      parts.add('높은 승률 지표');
+    if (pred.placeProbability >= 35) {
+      parts.add('높은 입상 지표');
     }
 
     if (entry != null && entry.winCount >= 3) {
@@ -899,9 +901,9 @@ class RaceEntryScreen extends ConsumerWidget {
       }
     }
 
-    if (pred.winProbability > 0) {
+    if (pred.placeProbability > 0) {
       lines.add(
-        'AI 분석 결과 승률 ${pred.winProbability.toStringAsFixed(1)}%로 예측됩니다.',
+        'AI 분석 결과 입상 확률 ${pred.placeProbability.toStringAsFixed(1)}%로 예측됩니다.',
       );
     }
 
@@ -958,10 +960,10 @@ class RaceEntryScreen extends ConsumerWidget {
     return null;
   }
 
-  static int _predictionRank(List<Prediction> preds, int horseNo) {
+  /// 종합출전표: AI **입상(연승)** 예측 순위
+  static int _predictionRankByPlace(List<Prediction> preds, int horseNo) {
     if (preds.isEmpty) return 0;
-    final sorted = [...preds]
-      ..sort((a, b) => b.winProbability.compareTo(a.winProbability));
+    final sorted = [...preds]..sort(Prediction.compareByPlaceThenWin);
     for (int i = 0; i < sorted.length; i++) {
       if (sorted[i].horseNo == horseNo) return i + 1;
     }
@@ -2024,7 +2026,7 @@ class _ComprehensiveRecommendation extends StatelessWidget {
 
       if (ratingRank <= 2 && entry.rating >= 80) {
         ratingScore = 25;
-        reasons.add('레이팅 ${ratingRank}위 (${entry.rating.toStringAsFixed(0)})');
+        reasons.add('레이팅 $ratingRank위 (${entry.rating.toStringAsFixed(0)})');
       } else if (ratingRank <= 3 && entry.rating >= 70) {
         ratingScore = 22;
         reasons.add('레이팅 상위권');
@@ -2062,8 +2064,9 @@ class _ComprehensiveRecommendation extends StatelessWidget {
       // 입상률 기반 (7점)
       if (placeRate >= 50) {
         performanceScore += 7;
-        if (winRate < 15)
+        if (winRate < 15) {
           reasons.add('안정적 입상 ${placeRate.toStringAsFixed(0)}%');
+        }
       } else if (placeRate >= 35) {
         performanceScore += 5;
       } else if (placeRate >= 20) {
@@ -2073,7 +2076,7 @@ class _ComprehensiveRecommendation extends StatelessWidget {
       // 경험치 보너스 (3점)
       if (totalRaces >= 20 && entry.winCount >= 3) {
         performanceScore += 3;
-        reasons.add('풍부한 경험 (${totalRaces}전 ${entry.winCount}승)');
+        reasons.add('풍부한 경험 ($totalRaces전 ${entry.winCount}승)');
       } else if (totalRaces >= 10) {
         performanceScore += 2;
       } else if (totalRaces >= 5) {
@@ -2085,19 +2088,22 @@ class _ComprehensiveRecommendation extends StatelessWidget {
       // ═══════════════════════════════════════════════════
       double jockeyScore = 0;
 
-      // AI 예측 (12점)
-      if (pred != null && pred.winProbability > 0) {
-        if (pred.winProbability >= 25) {
+      // AI 입상 예측 (12점)
+      if (pred != null && pred.placeProbability > 0) {
+        if (pred.placeProbability >= 45) {
           jockeyScore += 12;
-          reasons.add('AI 1순위 예측');
-        } else if (pred.winProbability >= 15) {
+          reasons.add('AI 입상 1순위 예측');
+        } else if (pred.placeProbability >= 35) {
           jockeyScore += 10;
-          reasons.add('AI 상위 예측');
-        } else if (pred.winProbability >= 10) {
+          reasons.add('AI 입상 상위 예측');
+        } else if (pred.placeProbability >= 25) {
           jockeyScore += 7;
-        } else if (pred.winProbability >= 5) {
+        } else if (pred.placeProbability >= 15) {
           jockeyScore += 4;
         }
+      }
+      if (pred != null && pred.placeProbability > 0) {
+        jockeyScore += (pred.placeProbability / 100 * 5).clamp(0, 5);
       }
 
       // 배당률 분석 (8점) - 낮은 배당 = 인기마
@@ -2115,7 +2121,7 @@ class _ComprehensiveRecommendation extends StatelessWidget {
         }
       } else if (pred != null) {
         // 배당 없으면 AI 예측으로 보정
-        jockeyScore += (pred.winProbability / 100 * 8).clamp(0, 8);
+        jockeyScore += (pred.placeProbability / 100 * 8).clamp(0, 8);
       }
 
       // ═══════════════════════════════════════════════════
@@ -2201,7 +2207,9 @@ class _ComprehensiveRecommendation extends StatelessWidget {
     recs.sort((a, b) {
       final scoreDiff = b.totalScore.compareTo(a.totalScore);
       if (scoreDiff != 0) return scoreDiff;
-      return b.ratingScore.compareTo(a.ratingScore);
+      final ratingDiff = b.ratingScore.compareTo(a.ratingScore);
+      if (ratingDiff != 0) return ratingDiff;
+      return a.horseNo.compareTo(b.horseNo);
     });
 
     return recs.take(3).toList();
@@ -2234,8 +2242,9 @@ class _ComprehensiveRecommendation extends StatelessWidget {
 
   IconData _getReasonIcon(String reason) {
     if (reason.contains('레이팅')) return Icons.star_rounded;
-    if (reason.contains('승률') || reason.contains('입상'))
+    if (reason.contains('승률') || reason.contains('입상')) {
       return Icons.emoji_events_rounded;
+    }
     if (reason.contains('AI')) return Icons.auto_awesome_rounded;
     if (reason.contains('거리')) return Icons.straighten_rounded;
     if (reason.contains('전개')) return Icons.speed_rounded;
@@ -2251,70 +2260,6 @@ class _PremiumSubscriptionPaywall extends ConsumerStatefulWidget {
   @override
   ConsumerState<_PremiumSubscriptionPaywall> createState() =>
       _PremiumSubscriptionPaywallState();
-}
-
-class _PremiumSubscribeInlineCta extends StatelessWidget {
-  const _PremiumSubscribeInlineCta();
-
-  @override
-  Widget build(BuildContext context) {
-    void moveToProfile() => context.push('/profile');
-
-    return Container(
-      margin: const EdgeInsets.fromLTRB(12, 6, 12, 8),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: const Color(0xFF171B24),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Icon(
-                Icons.workspace_premium_rounded,
-                color: AppTheme.accentGold,
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  '프리미엄 구독으로 종합추천/AI추천 보기',
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
-                    color: Colors.grey.shade200,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Center(
-            child: FilledButton(
-              onPressed: moveToProfile,
-              style: FilledButton.styleFrom(
-                backgroundColor: const Color(0xFF2E5B8A),
-                foregroundColor: Colors.white,
-                minimumSize: const Size(220, 38),
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-              ),
-              child: Text(
-                '프로필로 이동',
-                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
-              ),
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            '결제는 구글플레이에서 진행되며 신용카드, 휴대폰 결제, 계좌이체(지원 시) 중 선택할 수 있습니다.',
-            style: TextStyle(fontSize: 11, color: Colors.grey.shade400, height: 1.4),
-          ),
-        ],
-      ),
-    );
-  }
 }
 
 class _PremiumSubscriptionPaywallState
@@ -2363,9 +2308,13 @@ class _PremiumSubscriptionPaywallState
           const Icon(Icons.lock_rounded, color: Colors.amber, size: 32),
           const SizedBox(height: 12),
           const Text(
-            'AI 추천, 종합추천은\n구독 후 이용할 수 있습니다.',
+            'AI 추천은\n구독 후 이용할 수 있습니다.',
             textAlign: TextAlign.left,
-            style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900, height: 1.35),
+            style: TextStyle(
+              fontSize: 17,
+              fontWeight: FontWeight.w900,
+              height: 1.35,
+            ),
           ),
           const SizedBox(height: 16),
           Container(
@@ -2380,13 +2329,15 @@ class _PremiumSubscriptionPaywallState
                 _PlanOptionTile(
                   selected: isMonthly,
                   label: monthlyText(),
-                  onTap: () => setState(() => _selectedProductId = 'premium_monthly'),
+                  onTap: () =>
+                      setState(() => _selectedProductId = 'premium_monthly'),
                 ),
                 const SizedBox(height: 10),
                 _PlanOptionTile(
                   selected: !isMonthly,
                   label: yearlyText(),
-                  onTap: () => setState(() => _selectedProductId = 'premium_yearly'),
+                  onTap: () =>
+                      setState(() => _selectedProductId = 'premium_yearly'),
                 ),
               ],
             ),
@@ -2541,7 +2492,7 @@ class _ScoreBadge extends StatelessWidget {
           ),
           const SizedBox(height: 2),
           Text(
-            '${score.toStringAsFixed(0)}',
+            score.toStringAsFixed(0),
             style: TextStyle(
               fontSize: 10,
               fontWeight: FontWeight.w700,

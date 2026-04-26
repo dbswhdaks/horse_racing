@@ -12,7 +12,7 @@ class PredictionSummary extends StatelessWidget {
     if (report.predictions.isEmpty) return const SizedBox.shrink();
 
     final sorted = [...report.predictions]
-      ..sort((a, b) => b.winProbability.compareTo(a.winProbability));
+      ..sort(Prediction.compareByPlaceThenWin);
     final top3 = sorted.take(3).toList();
 
     return Container(
@@ -28,32 +28,27 @@ class PredictionSummary extends StatelessWidget {
           end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: Colors.deepPurple.withValues(alpha: 0.4),
-        ),
+        border: Border.all(color: Colors.deepPurple.withValues(alpha: 0.4)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Icon(Icons.auto_awesome,
-                  size: 18, color: Colors.purpleAccent.shade100),
+              Icon(
+                Icons.auto_awesome,
+                size: 18,
+                color: Colors.purpleAccent.shade100,
+              ),
               const SizedBox(width: 6),
               const Text(
-                'AI 예측 TOP 3',
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
-                ),
+                'AI 입상 TOP 3',
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
               ),
               const Spacer(),
               Text(
                 'v${report.modelVersion}',
-                style: TextStyle(
-                  fontSize: 11,
-                  color: Colors.grey.shade500,
-                ),
+                style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
               ),
             ],
           ),
@@ -66,7 +61,7 @@ class PredictionSummary extends StatelessWidget {
               child: _PredictionRow(
                 rank: idx + 1,
                 prediction: p,
-                maxProb: top3.first.winProbability,
+                maxProb: top3.first.placeProbability,
               ),
             );
           }),
@@ -103,7 +98,7 @@ class _PredictionRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final pct = prediction.winProbability;
+    final pct = prediction.placeProbability;
     final fraction = maxProb > 0 ? pct / maxProb : 0.0;
 
     return Row(
@@ -118,17 +113,14 @@ class _PredictionRow extends StatelessWidget {
               color: rank == 1
                   ? AppTheme.winColor
                   : rank == 2
-                      ? AppTheme.placeColor
-                      : AppTheme.showColor,
+                  ? AppTheme.placeColor
+                  : AppTheme.showColor,
             ),
           ),
         ),
         Text(
           '${prediction.horseNo}번 ',
-          style: const TextStyle(
-            fontSize: 13,
-            fontWeight: FontWeight.w600,
-          ),
+          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
         ),
         Expanded(
           child: Text(
@@ -158,10 +150,7 @@ class _PredictionRow extends StatelessWidget {
           child: Text(
             '${pct.toStringAsFixed(1)}%',
             textAlign: TextAlign.right,
-            style: const TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w700,
-            ),
+            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
           ),
         ),
       ],

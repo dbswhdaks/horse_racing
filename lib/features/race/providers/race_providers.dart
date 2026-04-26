@@ -246,13 +246,57 @@ final oddsProvider =
       );
     });
 
-// ── Predictions: Supabase → Local fallback → ML Backend ──
+// ── Predictions: Supabase place model → Local place model → ML fallback ──
 
 final predictionProvider =
     FutureProvider.family<
       PredictionReport?,
       ({String meet, String date, int raceNo})
     >((ref, params) async {
+      List<RaceEntry>? entriesCache;
+      List<Odds>? oddsCache;
+      Future<List<RaceEntry>> loadEntries() async {
+        if (entriesCache != null) return entriesCache!;
+        entriesCache = await ref.read(
+          raceStartListProvider((
+            meet: params.meet,
+            date: params.date,
+            raceNo: params.raceNo,
+          )).future,
+        );
+        return entriesCache!;
+      }
+
+      Future<List<Odds>> loadOdds() async {
+        if (oddsCache != null) return oddsCache!;
+        final supa = ref.read(supabaseServiceProvider);
+        var odds = await _withTimeout<List<Odds>>(
+          supa.getOdds(
+            meet: params.meet,
+            raceDate: params.date,
+            raceNo: params.raceNo,
+          ),
+          const Duration(seconds: 3),
+          const [],
+        );
+        if (odds.isNotEmpty) {
+          oddsCache = odds;
+          return odds;
+        }
+        final kra = ref.read(kraApiServiceProvider);
+        odds = await _withTimeout<List<Odds>>(
+          kra.getOddInfo(
+            meet: params.meet,
+            rcDate: params.date,
+            rcNo: params.raceNo,
+          ),
+          const Duration(seconds: 6),
+          const [],
+        );
+        oddsCache = odds;
+        return odds;
+      }
+
       // 1) Supabase
       final supa = ref.read(supabaseServiceProvider);
       try {
@@ -261,39 +305,72 @@ final predictionProvider =
           raceDate: params.date,
           raceNo: params.raceNo,
         );
-        if (report != null && report.predictions.isNotEmpty) return report;
+        if (report != null && report.predictions.isNotEmpty) {
+          final entries = await loadEntries();
+          if (report.modelVersion == LocalPredictor.modelVersion &&
+              (entries.isEmpty || _isPredictionAligned(report, entries))) {
+            return report;
+          }
+          debugPrint(
+            '[PRED] Supabase 예측 무시: model=${report.modelVersion}, '
+            '예측 ${report.predictions.length}건, 출마표 ${entries.length}두',
+          );
+        }
       } catch (_) {}
 
-      // 2) Local fallback from entry data (앱 초기 표시 속도 우선)
+      // 2) Local place model from entry data
       try {
-        final entries = await ref.read(
-          raceStartListProvider((
-            meet: params.meet,
-            date: params.date,
-            raceNo: params.raceNo,
-          )).future,
-        );
+        final entries = await loadEntries();
         if (entries.isNotEmpty) {
+          final odds = await loadOdds();
           return LocalPredictor.generate(
             meet: params.meet,
             date: params.date,
             raceNo: params.raceNo,
             entries: entries,
+            odds: odds,
           );
         }
       } catch (_) {}
 
-      // 3) ML Backend
-      final mlApi = ref.read(mlApiServiceProvider);
-      final remote = await mlApi.getPrediction(
-        meet: params.meet,
-        date: params.date,
-        raceNo: params.raceNo,
-      );
-      if (remote != null) return remote;
+      // 3) ML Backend fallback only when entry data is unavailable
+      try {
+        final mlApi = ref.read(mlApiServiceProvider);
+        final remote = await mlApi.getPrediction(
+          meet: params.meet,
+          date: params.date,
+          raceNo: params.raceNo,
+        );
+        if (remote != null && remote.predictions.isNotEmpty) {
+          final entries = await loadEntries();
+          if (entries.isEmpty || _isPredictionAligned(remote, entries)) {
+            return remote;
+          }
+          debugPrint(
+            '[PRED] ML 예측 말 수/마번 불일치: '
+            '${remote.predictions.length}건, 출마표 ${entries.length}두',
+          );
+        }
+      } catch (_) {}
 
       return null;
     });
+
+bool _isPredictionAligned(PredictionReport report, List<RaceEntry> entries) {
+  final entryHorseNos = entries.map((entry) => entry.horseNo).toSet();
+  final predictionHorseNos = report.predictions
+      .map((prediction) => prediction.horseNo)
+      .where((horseNo) => horseNo > 0)
+      .toSet();
+
+  if (entryHorseNos.isEmpty || predictionHorseNos.isEmpty) return false;
+  if (!entryHorseNos.containsAll(predictionHorseNos)) return false;
+
+  final minimumCoverage = entries.length <= 7
+      ? entries.length
+      : entries.length - 1;
+  return predictionHorseNos.length >= minimumCoverage;
+}
 
 // ── Horse History: Supabase → KRA API (현재 경마장 12개월 + 타 경마장 6개월) ──
 

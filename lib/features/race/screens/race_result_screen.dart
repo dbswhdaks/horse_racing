@@ -577,9 +577,11 @@ class _AiComparisonSectionState extends State<_AiComparisonSection> {
       _compPicks = loaded;
     }
 
-    // 종합추천 저장값이 없으면 상위 예측값으로 임시 표시해 빈칸을 방지
+    // 종합추천 저장값이 없으면 입상(연승) 예측 상위 5 — 종합 = 3위권 위주
     if (_compPicks.whereType<int>().isEmpty) {
-      final compTop = _buildComprehensiveTop5();
+      final byPlace = [...widget.predictions]
+        ..sort(Prediction.compareByPlaceThenWin);
+      final compTop = byPlace.take(5).map((p) => p.horseNo).toList();
       if (compTop.isNotEmpty) {
         final fallback = List<int?>.filled(5, null);
         for (var i = 0; i < compTop.length && i < 5; i++) {
@@ -592,6 +594,8 @@ class _AiComparisonSectionState extends State<_AiComparisonSection> {
     if (mounted) setState(() {});
   }
 
+  // (보류) 복잡 휴리스틱 fallback — 현재는 `compareByPlaceThenWin` 상위 5마리 사용
+  // ignore: unused_element
   List<int> _buildComprehensiveTop5() {
     if (widget.entries.isEmpty) return const [];
 
@@ -689,16 +693,19 @@ class _AiComparisonSectionState extends State<_AiComparisonSection> {
       }
 
       double jockeyScore = 0;
-      if (pred != null && pred.winProbability > 0) {
-        if (pred.winProbability >= 25) {
+      if (pred != null && pred.placeProbability > 0) {
+        if (pred.placeProbability >= 45) {
           jockeyScore += 12;
-        } else if (pred.winProbability >= 15) {
+        } else if (pred.placeProbability >= 35) {
           jockeyScore += 10;
-        } else if (pred.winProbability >= 10) {
+        } else if (pred.placeProbability >= 25) {
           jockeyScore += 7;
-        } else if (pred.winProbability >= 5) {
+        } else if (pred.placeProbability >= 15) {
           jockeyScore += 4;
         }
+      }
+      if (pred != null && pred.placeProbability > 0) {
+        jockeyScore += (pred.placeProbability / 100 * 5).clamp(0, 5);
       }
       if (hasOdds && winOdds > 0) {
         if (winOdds <= 3.0) {
@@ -711,7 +718,7 @@ class _AiComparisonSectionState extends State<_AiComparisonSection> {
           jockeyScore += 2;
         }
       } else if (pred != null) {
-        jockeyScore += (pred.winProbability / 100 * 8).clamp(0, 8);
+        jockeyScore += (pred.placeProbability / 100 * 8).clamp(0, 8);
       }
 
       double distanceScore = 0;
@@ -770,7 +777,9 @@ class _AiComparisonSectionState extends State<_AiComparisonSection> {
     recs.sort((a, b) {
       final scoreDiff = b.totalScore.compareTo(a.totalScore);
       if (scoreDiff != 0) return scoreDiff;
-      return b.ratingScore.compareTo(a.ratingScore);
+      final ratingDiff = b.ratingScore.compareTo(a.ratingScore);
+      if (ratingDiff != 0) return ratingDiff;
+      return a.horseNo.compareTo(b.horseNo);
     });
 
     return recs.take(5).map((e) => e.horseNo).toList();
@@ -805,28 +814,30 @@ class _AiComparisonSectionState extends State<_AiComparisonSection> {
   @override
   Widget build(BuildContext context) {
     final sorted = [...widget.predictions]
-      ..sort((a, b) => b.winProbability.compareTo(a.winProbability));
+      ..sort(Prediction.compareByWinThenPlace);
     if (sorted.isEmpty || widget.results.isEmpty) {
       return const SizedBox.shrink();
     }
 
-    final actualTop3 = widget.results
-        .where((r) => r.rank >= 1 && r.rank <= 3)
-        .take(3)
-        .toList();
+    final actualTop3 =
+        widget.results.where((r) => r.rank >= 1 && r.rank <= 3).toList()
+          ..sort((a, b) => a.rank.compareTo(b.rank));
+    final actualTop3Sorted = actualTop3.take(3).toList();
 
-    final top3pred = sorted.take(3).toList();
-    final aiHits = _countHits(
-      top3pred.map((p) => p.horseNo).toList(),
-      actualTop3,
-    );
+    // AI: 승률순 1·2·3착 pick vs 실제 1·2·3착(칸별 정확도)
+    int aiPosHits = 0;
+    for (int i = 0; i < 3; i++) {
+      if (i >= sorted.length) break;
+      final at = widget.results.where((r) => r.rank == i + 1).firstOrNull;
+      if (at != null && at.horseNo == sorted[i].horseNo) aiPosHits++;
+    }
     final compTop3 = _compPicks.take(3).whereType<int>().toList();
-    final compHits = _countHits(compTop3, actualTop3);
+    final compHits = _countHits(compTop3, actualTop3Sorted);
     final userTop3 = _userPicks.take(3).whereType<int>().toList();
-    final userHits = _countHits(userTop3, actualTop3);
+    final userHits = _countHits(userTop3, actualTop3Sorted);
 
     double pct(int hits, int total) => total > 0 ? hits / total * 100 : 0;
-    final aiAcc = pct(aiHits, top3pred.length);
+    final aiAcc = pct(aiPosHits, 3);
     final compAcc = pct(compHits, compTop3.length);
     final userAcc = pct(userHits, userTop3.length);
 
@@ -1722,7 +1733,7 @@ class _DetailedResultCard extends StatelessWidget {
                         '연승',
                         '${result.placeOdds.toStringAsFixed(1)}배',
                       ),
-                    if (prediction != null && prediction!.winProbability > 0)
+                    if (prediction != null && prediction!.placeProbability > 0)
                       Container(
                         padding: const EdgeInsets.symmetric(
                           horizontal: 8,
@@ -1742,7 +1753,7 @@ class _DetailedResultCard extends StatelessWidget {
                             ),
                             const SizedBox(width: 3),
                             Text(
-                              '${prediction!.winProbability.toStringAsFixed(1)}%',
+                              '입상 ${prediction!.placeProbability.toStringAsFixed(1)}%',
                               style: TextStyle(
                                 fontSize: 12,
                                 fontWeight: FontWeight.w700,

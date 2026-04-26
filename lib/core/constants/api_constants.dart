@@ -33,6 +33,7 @@ class ApiConstants {
 
   static const String mlBackendUrl = 'http://localhost:8000';
 
+  /// e오늘의 경주( todayrace.kra.co.kr )는 일자/경마장 안내·검증용. 배치 ETL은 공공데이터 KRA API 권장.
   static const String todayRaceBaseUrl = 'https://todayrace.kra.co.kr';
   static const String todayRaceScorePath = '/score/race/selectRaceList.do';
   static const String todayRaceParadeVideoUrl =

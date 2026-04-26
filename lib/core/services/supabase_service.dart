@@ -164,11 +164,12 @@ class SupabaseService {
         .eq('meet', meet)
         .eq('race_date', raceDate)
         .eq('race_no', raceNo)
-        .order('win_probability', ascending: false);
+        .order('created_at', ascending: false);
 
-    if (data.isEmpty) return null;
+    final rows = _selectPredictionRows(_normalizeRows(data));
+    if (rows.isEmpty) return null;
 
-    final predictions = data.map<Prediction>((row) {
+    final predictions = rows.map<Prediction>((row) {
       final tags =
           (row['tags'] as List<dynamic>?)?.map((e) => e.toString()).toList() ??
           [];
@@ -195,9 +196,10 @@ class SupabaseService {
       meet: meet,
       raceNo: raceNo,
       predictions: predictions,
-      modelVersion: data.first['model_version'] ?? '',
+      modelVersion: rows.first['model_version']?.toString() ?? '',
       generatedAt:
-          DateTime.tryParse(data.first['created_at'] ?? '') ?? DateTime.now(),
+          DateTime.tryParse(rows.first['created_at']?.toString() ?? '') ??
+          DateTime.now(),
     );
   }
 
@@ -228,6 +230,79 @@ class SupabaseService {
   static String _meetName(String meet) {
     const names = {'1': '서울', '2': '제주', '3': '부산경남'};
     return names[meet] ?? meet;
+  }
+
+  static List<Map<String, dynamic>> _selectPredictionRows(
+    List<Map<String, dynamic>> rows,
+  ) {
+    if (rows.isEmpty) return const [];
+
+    final byVersion = <String, List<Map<String, dynamic>>>{};
+    for (final row in rows) {
+      final version = row['model_version']?.toString() ?? '';
+      byVersion.putIfAbsent(version, () => []).add(row);
+    }
+
+    const preferredVersions = [
+      'heuristic-place-1.1',
+      'heuristic-place-1.0',
+      'heuristic-3.1-tuned',
+      'heuristic-3.1',
+      '1.0',
+    ];
+    final selectedVersion = preferredVersions
+        .where(byVersion.containsKey)
+        .cast<String?>()
+        .firstWhere((version) => version != null, orElse: () => null);
+
+    final versionRows = selectedVersion != null
+        ? byVersion[selectedVersion]!
+        : byVersion.entries.reduce((a, b) {
+            final aTime = a.value
+                .map(_createdAt)
+                .reduce(
+                  (current, next) => next.isAfter(current) ? next : current,
+                );
+            final bTime = b.value
+                .map(_createdAt)
+                .reduce(
+                  (current, next) => next.isAfter(current) ? next : current,
+                );
+            return bTime.isAfter(aTime) ? b : a;
+          }).value;
+
+    final latestByHorseNo = <int, Map<String, dynamic>>{};
+    final sortedByCreatedAt = [...versionRows]
+      ..sort((a, b) {
+        final timeCompare = _createdAt(b).compareTo(_createdAt(a));
+        if (timeCompare != 0) return timeCompare;
+        return ((b['win_probability'] as num?)?.toDouble() ?? 0).compareTo(
+          (a['win_probability'] as num?)?.toDouble() ?? 0,
+        );
+      });
+
+    for (final row in sortedByCreatedAt) {
+      final horseNo = (row['horse_no'] as num?)?.toInt() ?? 0;
+      if (horseNo <= 0 || latestByHorseNo.containsKey(horseNo)) continue;
+      latestByHorseNo[horseNo] = row;
+    }
+
+    return latestByHorseNo.values.toList()..sort((a, b) {
+      final winCompare = ((b['win_probability'] as num?)?.toDouble() ?? 0)
+          .compareTo((a['win_probability'] as num?)?.toDouble() ?? 0);
+      if (winCompare != 0) return winCompare;
+      final placeCompare = ((b['place_probability'] as num?)?.toDouble() ?? 0)
+          .compareTo((a['place_probability'] as num?)?.toDouble() ?? 0);
+      if (placeCompare != 0) return placeCompare;
+      final aHorseNo = (a['horse_no'] as num?)?.toInt() ?? 0;
+      final bHorseNo = (b['horse_no'] as num?)?.toInt() ?? 0;
+      return aHorseNo.compareTo(bHorseNo);
+    });
+  }
+
+  static DateTime _createdAt(Map<String, dynamic> row) {
+    return DateTime.tryParse(row['created_at']?.toString() ?? '') ??
+        DateTime.fromMillisecondsSinceEpoch(0);
   }
 
   static List<Map<String, dynamic>> _normalizeRows(dynamic data) {

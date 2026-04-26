@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -5,7 +8,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-import 'core/constants/supabase_constants.dart';
+import 'core/config/supabase_config.dart';
+import 'core/config/supabase_connection_check.dart';
 import 'core/theme/app_theme.dart';
 import 'features/purchase/providers/in_app_purchase_provider.dart';
 import 'router/app_router.dart';
@@ -24,10 +28,15 @@ void main() async {
 
   await initializeDateFormatting('ko');
 
+  final supa = await SupabaseConfig.load();
   await Supabase.initialize(
-    url: SupabaseConstants.url,
-    anonKey: SupabaseConstants.anonKey,
+    url: supa.url,
+    anonKey: supa.anonKey,
   );
+
+  if (kDebugMode) {
+    unawaited(SupabaseConnectionCheck.logProbe());
+  }
 
   runApp(const ProviderScope(child: HorseRacingApp()));
 }
