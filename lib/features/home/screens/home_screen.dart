@@ -268,7 +268,7 @@ class _RaceListTabState extends ConsumerState<_RaceListTab> {
 
   void _prefetchEntryData(Race race) {
     final entryParams = (
-      meet: race.meet,
+      meet: widget.meet,
       date: race.raceDate,
       raceNo: race.raceNo,
     );
@@ -276,13 +276,18 @@ class _RaceListTabState extends ConsumerState<_RaceListTab> {
     unawaited(ref.read(oddsProvider(entryParams).future));
     unawaited(ref.read(predictionProvider(entryParams).future));
     unawaited(
-      ref.read(racePlanProvider((meet: race.meet, date: race.raceDate)).future),
+      ref.read(
+        racePlanProvider((meet: widget.meet, date: race.raceDate)).future,
+      ),
     );
   }
 
   void _openEntryDetail(Race race, BuildContext context) {
     _prefetchEntryData(race);
-    context.push('/entry/${race.meet}/${race.raceDate}/${race.raceNo}');
+    context.push(
+      '/entry/${widget.meet}/${race.raceDate}/${race.raceNo}',
+      extra: race,
+    );
   }
 
   @override
@@ -330,7 +335,7 @@ class _RaceListTabState extends ConsumerState<_RaceListTab> {
                 headCount: actualHeadCount,
                 onTap: () => _openEntryDetail(race, context),
                 onResultTap: () => context.push(
-                  '/result/${race.meet}/${race.raceDate}/${race.raceNo}',
+                  '/result/${widget.meet}/${race.raceDate}/${race.raceNo}',
                 ),
               );
             },

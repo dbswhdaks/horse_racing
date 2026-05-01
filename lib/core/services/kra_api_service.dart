@@ -24,7 +24,10 @@ class KraApiService {
       throw Exception('경주일정 서버 연결에 실패했습니다. 잠시 후 다시 시도해주세요.');
     }
 
-    var races = _parseList(response, (json) => Race.fromJson(json));
+    var races = _parseList(
+      response,
+      (json) => Race.fromJson({...json, 'meet': meet}),
+    );
 
     if (races.isEmpty &&
         rcDate != null &&
@@ -36,7 +39,10 @@ class KraApiService {
         'rc_month': monthParam,
       });
       if (monthResponse != null) {
-        races = _parseList(monthResponse, (json) => Race.fromJson(json));
+        races = _parseList(
+          monthResponse,
+          (json) => Race.fromJson({...json, 'meet': meet}),
+        );
         races = races.where((r) => r.raceDate == rcDate).toList();
       }
     }

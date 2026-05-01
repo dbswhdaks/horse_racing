@@ -72,11 +72,33 @@ final racePlanProvider =
 
 // ── Entries: Supabase first → KRA API fallback ──
 
-final raceStartListProvider =
+final FutureProviderFamily<
+  List<RaceEntry>,
+  ({String meet, String? date, int? raceNo})
+>
+raceStartListProvider =
     FutureProvider.family<
       List<RaceEntry>,
       ({String meet, String? date, int? raceNo})
     >((ref, params) async {
+      if (params.date != null && params.raceNo != null) {
+        final dayEntries = ref
+            .read(
+              raceStartListProvider((
+                meet: params.meet,
+                date: params.date,
+                raceNo: null,
+              )),
+            )
+            .valueOrNull;
+        if (dayEntries != null && dayEntries.isNotEmpty) {
+          final cachedEntries = dayEntries
+              .where((entry) => entry.raceNo == params.raceNo)
+              .toList();
+          if (cachedEntries.isNotEmpty) return cachedEntries;
+        }
+      }
+
       final supa = ref.read(supabaseServiceProvider);
       final entries = await _withTimeout<List<RaceEntry>>(
         supa.getEntries(

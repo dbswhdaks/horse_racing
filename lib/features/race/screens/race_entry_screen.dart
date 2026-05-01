@@ -21,6 +21,7 @@ class RaceEntryScreen extends ConsumerWidget {
   final String date;
   final int raceNo;
   final int initialTabIndex;
+  final Race? initialRace;
 
   const RaceEntryScreen({
     super.key,
@@ -28,6 +29,7 @@ class RaceEntryScreen extends ConsumerWidget {
     required this.date,
     required this.raceNo,
     this.initialTabIndex = 0,
+    this.initialRace,
   });
 
   @override
@@ -50,9 +52,9 @@ class RaceEntryScreen extends ConsumerWidget {
     final canViewAiRecommendation = purchasedProductIds.any(
       IapConstants.subscriptionProductIds.contains,
     );
-    final race = raceAsync.valueOrNull
-        ?.where((r) => r.raceNo == raceNo)
-        .firstOrNull;
+    final race =
+        raceAsync.valueOrNull?.where((r) => r.raceNo == raceNo).firstOrNull ??
+        (initialRace?.raceNo == raceNo ? initialRace : null);
 
     return DefaultTabController(
       length: 2,
@@ -2346,10 +2348,11 @@ class _PremiumSubscriptionPaywallState
           SizedBox(
             width: 220,
             child: FilledButton.icon(
-              onPressed: () => context.push('/profile'),
+              onPressed: () =>
+                  context.push('/subscription?plan=$_selectedProductId'),
               icon: const Icon(Icons.verified_rounded, size: 18),
               label: const Text(
-                '프로필로 이동',
+                '구독하기',
                 style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
               ),
               style: FilledButton.styleFrom(
