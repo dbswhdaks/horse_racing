@@ -35,12 +35,15 @@ class _InAppWebViewScreenState extends State<InAppWebViewScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: Text(widget.title)),
-      body: Stack(
-        children: [
-          WebViewWidget(controller: _controller),
-          if (_loadingProgress < 100)
-            LinearProgressIndicator(value: _loadingProgress / 100),
-        ],
+      body: SafeArea(
+        top: false,
+        child: Stack(
+          children: [
+            WebViewWidget(controller: _controller),
+            if (_loadingProgress < 100)
+              LinearProgressIndicator(value: _loadingProgress / 100),
+          ],
+        ),
       ),
     );
   }

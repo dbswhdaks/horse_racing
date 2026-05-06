@@ -17,14 +17,17 @@ import 'router/app_router.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  // Android 15(API 35)에서 Window.setStatusBarColor / setNavigationBarColor 등이 deprecated 되었기 때문에
+  // 색상은 MainActivity.enableEdgeToEdge() 로만 처리하고, 여기서는 아이콘 밝기와 contrast 강제만 지정한다.
+  SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(
-      statusBarColor: Colors.transparent,
-      systemNavigationBarColor: Colors.transparent,
-      systemNavigationBarDividerColor: Colors.transparent,
+      statusBarBrightness: Brightness.dark,
+      statusBarIconBrightness: Brightness.light,
+      systemNavigationBarIconBrightness: Brightness.light,
+      systemNavigationBarContrastEnforced: false,
     ),
   );
-  SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
 
   await initializeDateFormatting('ko');
 
