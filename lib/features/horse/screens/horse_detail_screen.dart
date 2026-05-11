@@ -211,14 +211,20 @@ class _ProfileCard extends StatelessWidget {
                   borderRadius: BorderRadius.circular(14),
                 ),
                 child: Center(
-                  child: Text(
-                    '${entry.horseNo}',
-                    style: const TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.w900,
-                      color: AppTheme.primaryGreen,
-                    ),
-                  ),
+                  child: entry.horseNo > 0 && entry.horseNo <= 30
+                      ? Text(
+                          '${entry.horseNo}',
+                          style: const TextStyle(
+                            fontSize: 22,
+                            fontWeight: FontWeight.w900,
+                            color: AppTheme.primaryGreen,
+                          ),
+                        )
+                      : const Icon(
+                          Icons.directions_run_rounded,
+                          color: AppTheme.primaryGreen,
+                          size: 26,
+                        ),
                 ),
               ),
               const SizedBox(width: 14),

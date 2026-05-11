@@ -54,15 +54,29 @@ class RaceResult {
       horseNo: _toInt(json['gtno'] ?? json['chulNo'] ?? json['hrNo']),
       horseName: _str(json['hrnm'] ?? json['hrName'] ?? json['hrNm'] ?? ''),
       jockeyName: _cleanName(
-          _str(json['jckyNm'] ?? json['jkName'] ?? json['jkNm'] ?? '')),
-      trainerName:
-          _str(json['trarNm'] ?? json['trName'] ?? json['trNm'] ?? ''),
+        _str(json['jckyNm'] ?? json['jkName'] ?? json['jkNm'] ?? ''),
+      ),
+      trainerName: _str(json['trarNm'] ?? json['trName'] ?? json['trNm'] ?? ''),
       raceTime: _fmtTime(json['raceRcd'] ?? json['rcTime'] ?? ''),
-      weight: _toDouble(json['burdWgt'] ?? json['wgBudam'] ?? json['wght']),
-      horseWeight: _parseHorseWeight(json['rchrWeg'] ?? json['hrWght'] ?? 0),
+      weight: _toDouble(
+        json['burdWgt'] ?? json['wgBudam'] ?? json['wght'] ?? json['brdnWt'],
+      ),
+      horseWeight: _parseHorseWeight(
+        json['rchrWeg'] ??
+            json['hrWght'] ??
+            json['wgHr'] ??
+            json['hrWg'] ??
+            json['rcHrsWt'] ??
+            json['bdWgh'] ??
+            0,
+      ),
       rankDiff: _str(json['margin'] ?? json['ordDiff'] ?? ''),
-      winOdds: _toDouble(json['winPrice'] ?? json['winOdds']),
-      placeOdds: _toDouble(json['placePrice'] ?? json['plcOdds']),
+      winOdds: _toDouble(
+        json['winPrice'] ?? json['winOdds'] ?? json['winRate'],
+      ),
+      placeOdds: _toDouble(
+        json['placePrice'] ?? json['plcOdds'] ?? json['plcRate'],
+      ),
       s1f: _str(json['s1f'] ?? json['s1fTm'] ?? ''),
       g3f: _str(json['g3f'] ?? json['g3fTm'] ?? ''),
       passOrder: _str(json['ordBigo'] ?? json['passOrdTxt'] ?? ''),

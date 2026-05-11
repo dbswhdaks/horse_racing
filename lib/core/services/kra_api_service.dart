@@ -76,7 +76,9 @@ class KraApiService {
       if (first is Map) {
         debugPrint('[KRA] 출전표 필드 목록: ${first.keys.toList()}');
         debugPrint(
-          '[KRA] chulNo=${first['chulNo']}, hrNo=${first['hrNo']}, '
+          '[KRA] chulNo=${first['chulNo']}, startNo=${first['startNo']}, '
+          'gtno=${first['gtno']}, gateNo=${first['gateNo']}, '
+          'gateNum=${first['gateNum']}, hrNo=${first['hrNo']}, '
           'hrNm=${first['hrNm']}, jkNm=${first['jkNm']}, '
           'jockyNm=${first['jockyNm']}, trNm=${first['trNm']}',
         );
@@ -125,6 +127,23 @@ class KraApiService {
         '[KRA] getRaceResult resultCode=$resultCode, '
         'totalCount=$totalCount',
       );
+
+      // 첫 아이템의 모든 필드명을 로깅하여 마체중/배당률 키를 파악한다.
+      final rawItems = body['response']?['body']?['items']?['item'];
+      if (rawItems is List && rawItems.isNotEmpty) {
+        final first = rawItems.first;
+        if (first is Map) {
+          debugPrint('[KRA] 경주결과 필드 목록: ${first.keys.toList()}');
+          debugPrint(
+            '[KRA] hrNo=${first['hrNo']}, gtno=${first['gtno']}, '
+            'hrNm=${first['hrNm']}, ord=${first['ord']}, '
+            'wgHr=${first['wgHr']}, rchrWeg=${first['rchrWeg']}, '
+            'hrWght=${first['hrWght']}, winOdds=${first['winOdds']}, '
+            'winPrice=${first['winPrice']}, plcOdds=${first['plcOdds']}, '
+            'placePrice=${first['placePrice']}',
+          );
+        }
+      }
     }
 
     var results = _parseList(response, (json) => RaceResult.fromJson(json));

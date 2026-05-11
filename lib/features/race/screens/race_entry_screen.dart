@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -10,11 +11,19 @@ import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/shimmer_loading.dart';
 import '../../../models/race.dart';
 import '../../../models/race_entry.dart';
+import '../../../models/race_result.dart';
 import '../../../models/odds.dart';
 import '../../../models/prediction.dart';
 import '../../purchase/providers/in_app_purchase_provider.dart';
 import '../providers/race_providers.dart';
 import '../widgets/race_auto_refresh_hook.dart';
+
+/// 개발자 본인이 페이월 없이 AI 탭을 보기 위한 우회 플래그.
+/// - 디버그 빌드(kDebugMode)는 자동으로 통과한다.
+/// - 릴리스 빌드에서 통과하려면 빌드 시
+///   `--dart-define=DEV_BYPASS_PAYWALL=true` 옵션을 함께 지정한다.
+const bool _kDevBypassPaywall =
+    bool.fromEnvironment('DEV_BYPASS_PAYWALL', defaultValue: false);
 
 class RaceEntryScreen extends ConsumerWidget {
   final String meet;
@@ -49,9 +58,12 @@ class RaceEntryScreen extends ConsumerWidget {
     final purchasedProductIds = ref.watch(
       inAppPurchaseProvider.select((state) => state.purchasedProductIds),
     );
-    final canViewAiRecommendation = purchasedProductIds.any(
+    final hasSubscription = purchasedProductIds.any(
       IapConstants.subscriptionProductIds.contains,
     );
+    // 디버그 빌드 또는 DEV_BYPASS_PAYWALL=true 로 빌드한 경우 페이월을 우회한다.
+    final canViewAiRecommendation =
+        hasSubscription || kDebugMode || _kDevBypassPaywall;
     final race =
         raceAsync.valueOrNull?.where((r) => r.raceNo == raceNo).firstOrNull ??
         (initialRace?.raceNo == raceNo ? initialRace : null);
@@ -152,12 +164,25 @@ class RaceEntryScreen extends ConsumerWidget {
                       canViewAiRecommendation,
                     ),
                     // ── AI 추천 탭 ──
-                    _buildAiTab(
-                      context,
-                      entriesAsync,
-                      predAsync,
-                      canViewAiRecommendation,
-                      iapState,
+                    Consumer(
+                      builder: (context, ref, _) {
+                        final resultsAsync = ref.watch(
+                          raceResultProvider((
+                            meet: meet,
+                            date: date,
+                            raceNo: raceNo,
+                          )),
+                        );
+                        return _buildAiTab(
+                          context,
+                          entriesAsync,
+                          oddsAsync,
+                          predAsync,
+                          canViewAiRecommendation,
+                          iapState,
+                          results: resultsAsync.valueOrNull ?? const [],
+                        );
+                      },
                     ),
                   ],
                 ),
@@ -208,17 +233,91 @@ class RaceEntryScreen extends ConsumerWidget {
           ],
         ),
       ),
-      data: (entries) {
-        if (entries.isEmpty) {
+      data: (rawEntries) {
+        if (rawEntries.isEmpty) {
           return const Center(child: Text('출마 정보가 없습니다'));
         }
-        final odds = oddsAsync.valueOrNull ?? [];
+
+        // ── 결과 페이지 데이터를 가져와 entries/odds 를 보강한다.
+        // 마체중·단승배당·실제 게이트 번호는 결과 API 가 더 정확하다.
+        final resultsAsync = ref.watch(
+          raceResultProvider((meet: meet, date: date, raceNo: raceNo)),
+        );
+        final results = resultsAsync.valueOrNull ?? const <RaceResult>[];
+        final nameToResult = <String, RaceResult>{
+          for (final r in results)
+            if (r.horseName.isNotEmpty) r.horseName: r,
+        };
+
+        // entries 보강: 마체중·부담중량이 비어있으면 결과 값으로 채운다.
+        final entries = rawEntries.map((e) {
+          final r = nameToResult[e.horseName];
+          if (r == null) return e;
+          return e.copyWith(
+            horseWeight: e.horseWeight > 0 ? e.horseWeight : r.horseWeight,
+            weight: e.weight > 0 ? e.weight : r.weight,
+          );
+        }).toList();
+
+        // odds 보강: 단승배당이 비어있으면 결과의 단승배당으로 합성한다.
+        final baseOdds = oddsAsync.valueOrNull ?? const <Odds>[];
+        final hasWinOdds = baseOdds.any(
+          (o) => (o.betType == 'WIN' || o.betType == '1') && o.rate > 0,
+        );
+        final synthesizedOdds = <Odds>[];
+        if (!hasWinOdds) {
+          for (final entry in entries) {
+            final r = nameToResult[entry.horseName];
+            if (r != null && r.winOdds > 0) {
+              synthesizedOdds.add(
+                Odds(
+                  betType: 'WIN',
+                  horseNo1: entry.horseNo,
+                  horseNo2: 0,
+                  horseNo3: 0,
+                  rate: r.winOdds,
+                ),
+              );
+            }
+            if (r != null && r.placeOdds > 0) {
+              synthesizedOdds.add(
+                Odds(
+                  betType: 'PLC',
+                  horseNo1: entry.horseNo,
+                  horseNo2: 0,
+                  horseNo3: 0,
+                  rate: r.placeOdds,
+                ),
+              );
+            }
+          }
+        }
+        final odds = synthesizedOdds.isNotEmpty
+            ? [...baseOdds, ...synthesizedOdds]
+            : baseOdds;
+
         final predictions = predAsync.valueOrNull?.predictions ?? [];
         final predictionsByPlace = [...predictions]
           ..sort(Prediction.compareByPlaceThenWin);
+
+        // 결과 페이지의 horseNo(=gtno)는 실제 게이트 번호다.
+        // 결과가 있으면 이름 기반으로 게이트 매핑을 갱신한다.
+        final gateMap = _buildGateMapWithResults(entries, results);
         final sorted = List<RaceEntry>.from(entries)
-          ..sort((a, b) => a.horseNo.compareTo(b.horseNo));
+          ..sort(
+            (a, b) => (gateMap[a.horseNo] ?? a.horseNo).compareTo(
+              gateMap[b.horseNo] ?? b.horseNo,
+            ),
+          );
         final distance = race?.distance ?? 0;
+
+        // ── 각 말의 전적/승률/입상률 (entrySheet 가 비어도 Supabase/KRA 에서 보강) ──
+        final statsAsync = ref.watch(
+          raceHorseStatsProvider((meet: meet, date: date, raceNo: raceNo)),
+        );
+        final statsMap =
+            statsAsync.valueOrNull ?? const <String, HorseStatsSnapshot>{};
+        final statsLoading = statsAsync.isLoading;
 
         return CustomScrollView(
           slivers: [
@@ -229,6 +328,7 @@ class RaceEntryScreen extends ConsumerWidget {
                 raceKey: '${meet}_${date}_$raceNo',
                 entries: entries,
                 predictions: predictionsByPlace,
+                gateByHorseNo: gateMap,
               ),
             ),
             const SliverToBoxAdapter(child: SizedBox(height: 20)),
@@ -242,6 +342,7 @@ class RaceEntryScreen extends ConsumerWidget {
                   predictions: predictionsByPlace,
                   odds: odds,
                   distance: race?.distance ?? 1400,
+                  gateByHorseNo: gateMap,
                 );
               }(),
             ),
@@ -258,6 +359,7 @@ class RaceEntryScreen extends ConsumerWidget {
                   predictions: predictions,
                   odds: odds,
                   distance: race?.distance ?? 1400,
+                  gateByHorseNo: gateMap,
                 );
               }(),
             ),
@@ -290,15 +392,19 @@ class RaceEntryScreen extends ConsumerWidget {
                   predictions,
                   entry.horseNo,
                 );
+                final displayNo = gateMap[entry.horseNo] ?? entry.horseNo;
                 return _HorseCard(
                   entry: entry,
+                  displayNo: displayNo,
                   winOdds: winOdds,
                   prediction: pred,
                   predictionRank: predRank,
                   distance: distance,
+                  stats: statsMap[entry.horseName],
+                  statsLoading: statsLoading,
                   onTap: () => context.push(
                     '/horse/${Uri.encodeComponent(entry.horseName)}?meet=$meet',
-                    extra: entry,
+                    extra: entry.copyWith(horseNo: displayNo),
                   ),
                 );
               }, childCount: sorted.length),
@@ -341,56 +447,95 @@ class RaceEntryScreen extends ConsumerWidget {
   Widget _buildAiTab(
     BuildContext context,
     AsyncValue<List<RaceEntry>> entriesAsync,
+    AsyncValue<List<Odds>> oddsAsync,
     AsyncValue<PredictionReport?> predAsync,
     bool canViewAiRecommendation,
-    InAppPurchaseState iapState,
-  ) {
+    InAppPurchaseState iapState, {
+    List<RaceResult> results = const [],
+  }) {
     if (!canViewAiRecommendation) {
       return _PremiumSubscriptionPaywall(iapState: iapState);
     }
 
-    return predAsync.when(
-      loading: () => ListView(
-        padding: const EdgeInsets.all(12),
-        children: const [
-          ShimmerLoading(height: 120),
-          SizedBox(height: 10),
-          ShimmerLoading(height: 400),
-        ],
-      ),
-      error: (_, __) => const Center(child: Text('AI 예측 데이터를 불러올 수 없습니다')),
-      data: (report) {
-        if (report == null || report.predictions.isEmpty) {
-          return Center(
-            child: Padding(
-              padding: const EdgeInsets.all(32),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    Icons.auto_awesome,
-                    size: 48,
-                    color: Colors.purple.shade300,
-                  ),
-                  const SizedBox(height: 12),
-                  const Text(
-                    'AI 예측 데이터를 준비 중입니다',
-                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    '출전표 정보 확보 후 자동 표시됩니다',
-                    style: TextStyle(fontSize: 13, color: Colors.grey.shade500),
-                  ),
-                ],
-              ),
-            ),
-          );
-        }
+    Widget shimmer() => ListView(
+      padding: const EdgeInsets.all(12),
+      children: const [
+        ShimmerLoading(height: 120),
+        SizedBox(height: 10),
+        ShimmerLoading(height: 400),
+      ],
+    );
 
-        final entries = entriesAsync.valueOrNull ?? [];
+    // 예측만 먼저 도착하고 출주표가 아직이면 (번호·이름) 매핑이 비어 있어
+    // 잠깐 다른 번호·이름이 보이는 깜빡임이 생긴다. 두 데이터가 모두 준비된
+    // 경우에만 본문을 렌더한다.
+    if (entriesAsync.isLoading || predAsync.isLoading) {
+      return shimmer();
+    }
+    if (predAsync.hasError) {
+      return const Center(child: Text('AI 예측 데이터를 불러올 수 없습니다'));
+    }
+
+    final entries = entriesAsync.valueOrNull ?? const <RaceEntry>[];
+    final report = predAsync.valueOrNull;
+
+    if (entries.isEmpty || report == null || report.predictions.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.auto_awesome,
+                size: 48,
+                color: Colors.purple.shade300,
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'AI 예측 데이터를 준비 중입니다',
+                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                '출전표 정보 확보 후 자동 표시됩니다',
+                style: TextStyle(fontSize: 13, color: Colors.grey.shade500),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Builder(
+      builder: (context) {
+        final odds = oddsAsync.valueOrNull ?? const <Odds>[];
         final meetName = ApiConstants.meetNames[meet] ?? meet;
-        final sorted = [...report.predictions]
+        final nameByEntryHorseNo = <int, String>{
+          for (final e in entries)
+            if (e.horseName.isNotEmpty) e.horseNo: e.horseName,
+        };
+        // 종합추천 탭과 동일한 매핑(_buildGateMapWithResults)을 사용해
+        // 같은 말이 두 탭에서 동일한 게이트(번호)로 표시되도록 통일한다.
+        final gateMap = _buildGateMapWithResults(entries, results);
+        // 예측 데이터의 horseName 이 출주표와 어긋난 경우(오래된 Supabase 응답 등),
+        // 출주표 이름으로 보정해 (번호, 이름) 쌍이 항상 일치하도록 한다.
+        final correctedPredictions = report.predictions.map((p) {
+          final entryName = nameByEntryHorseNo[p.horseNo];
+          if (entryName == null || entryName.isEmpty || entryName == p.horseName) {
+            return p;
+          }
+          return Prediction(
+            horseNo: p.horseNo,
+            horseName: entryName,
+            jockeyName: p.jockeyName,
+            winProbability: p.winProbability,
+            placeProbability: p.placeProbability,
+            tags: p.tags,
+            featureImportance: p.featureImportance,
+          );
+        }).toList();
+        final sorted = [...correctedPredictions]
           ..sort(Prediction.compareByWinThenPlace);
 
         final gap = sorted.length >= 2
@@ -406,6 +551,7 @@ class RaceEntryScreen extends ConsumerWidget {
               raceKey: '${meet}_${date}_$raceNo',
               entries: entries,
               predictions: sorted,
+              gateByHorseNo: gateMap,
               horizontalMargin: 0,
             ),
             const SizedBox(height: 20),
@@ -541,6 +687,8 @@ class RaceEntryScreen extends ConsumerWidget {
               final matchEntry = entries
                   .where((en) => en.horseNo == pred.horseNo)
                   .firstOrNull;
+              final winOdds = _findWinOdds(odds, pred.horseNo);
+              final marketProb = winOdds > 0 ? 100 / winOdds : 0.0;
 
               return Container(
                 margin: const EdgeInsets.only(bottom: 8),
@@ -587,7 +735,7 @@ class RaceEntryScreen extends ConsumerWidget {
                                 horizontal: 4,
                               ),
                               child: Text(
-                                '${pred.horseNo}',
+                                '${gateMap[pred.horseNo] ?? pred.horseNo}',
                                 style: const TextStyle(
                                   fontSize: 13,
                                   fontWeight: FontWeight.w800,
@@ -654,15 +802,32 @@ class RaceEntryScreen extends ConsumerWidget {
                             ],
                           ),
                         ),
-                        Text(
-                          '${pred.winProbability.toStringAsFixed(1)}%',
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w900,
-                            color: isTop3
-                                ? AppTheme.accentGold
-                                : Colors.grey.shade400,
-                          ),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            Text(
+                              '${pred.winProbability.toStringAsFixed(1)}%',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.w900,
+                                color: isTop3
+                                    ? AppTheme.accentGold
+                                    : Colors.grey.shade400,
+                              ),
+                            ),
+                            if (marketProb > 0)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 1),
+                                child: Text(
+                                  '배당 ${marketProb.toStringAsFixed(1)}%',
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w600,
+                                    color: Colors.grey.shade500,
+                                  ),
+                                ),
+                              ),
+                          ],
                         ),
                       ],
                     ),
@@ -688,14 +853,18 @@ class RaceEntryScreen extends ConsumerWidget {
             const SizedBox(height: 18),
 
             // AI 분석 설명
-            _buildAiAnalysis(sorted, entries),
+            _buildAiAnalysis(sorted, entries, gateMap),
           ],
         );
       },
     );
   }
 
-  Widget _buildAiAnalysis(List<Prediction> sorted, List<RaceEntry> entries) {
+  Widget _buildAiAnalysis(
+    List<Prediction> sorted,
+    List<RaceEntry> entries,
+    Map<int, int> gateMap,
+  ) {
     if (sorted.isEmpty) return const SizedBox.shrink();
     final a = sorted[0];
     final b = sorted.length > 1 ? sorted[1] : a;
@@ -706,6 +875,8 @@ class RaceEntryScreen extends ConsumerWidget {
 
     String reason1 = _buildReason(a, aEntry);
     String reason2 = _buildReason(b, bEntry);
+
+    int gateOf(int horseNo) => gateMap[horseNo] ?? horseNo;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -734,9 +905,9 @@ class RaceEntryScreen extends ConsumerWidget {
             border: Border.all(color: Colors.lightBlue.withValues(alpha: 0.3)),
           ),
           child: Text(
-            '${a.horseNo}번 ${a.horseName} 선수가 $reason1으로 가장 유리합니다.\n\n'
-            '대항마로 ${b.horseNo}번 ${b.horseName}($reason2), '
-            '${c.horseNo}번 ${c.horseName} 선수를 주시하세요.',
+            '${gateOf(a.horseNo)}번 ${a.horseName} 선수가 $reason1으로 가장 유리합니다.\n\n'
+            '대항마로 ${gateOf(b.horseNo)}번 ${b.horseName}($reason2), '
+            '${gateOf(c.horseNo)}번 ${c.horseName} 선수를 주시하세요.',
             style: TextStyle(
               fontSize: 14,
               fontWeight: FontWeight.w500,
@@ -788,7 +959,7 @@ class RaceEntryScreen extends ConsumerWidget {
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        '${pred.horseNo}번 ${pred.horseName}',
+                        '${gateOf(pred.horseNo)}번 ${pred.horseName}',
                         style: const TextStyle(
                           fontSize: 15,
                           fontWeight: FontWeight.w700,
@@ -796,7 +967,7 @@ class RaceEntryScreen extends ConsumerWidget {
                       ),
                     ),
                     Text(
-                      '${pred.placeProbability.toStringAsFixed(1)}%',
+                      '${pred.winProbability.toStringAsFixed(1)}%',
                       style: const TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.w900,
@@ -946,6 +1117,42 @@ class RaceEntryScreen extends ConsumerWidget {
     }
   }
 
+  /// 게이트(출주) 번호 맵을 만든다.
+  ///
+  /// KRA 출주표 API는 응답 순서가 곧 게이트 순서이므로, 별도 정렬 없이
+  /// 응답 인덱스를 그대로 게이트 번호로 사용한다. 이렇게 하면
+  ///  - chulNo 가 정상 반환된 경우 (entry.horseNo == chulNo) → 항등 매핑
+  ///  - chulNo 가 누락되어 entry.horseNo 가 hrNo(5자리)인 경우에도
+  ///    실제 게이트와 동일한 1자리 번호로 표시된다.
+  static Map<int, int> _buildGateMap(List<RaceEntry> entries) {
+    return {
+      for (var i = 0; i < entries.length; i++) entries[i].horseNo: i + 1,
+    };
+  }
+
+  /// 결과 페이지 데이터가 있으면 결과 API의 `horseNo`(=gtno, 실제 게이트)를
+  /// 권위 있는 값으로 사용해 매핑을 갱신한다. 결과에 없는 말은 응답 순서로
+  /// 폴백한다.
+  static Map<int, int> _buildGateMapWithResults(
+    List<RaceEntry> entries,
+    List<RaceResult> results,
+  ) {
+    if (results.isEmpty) return _buildGateMap(entries);
+
+    final nameToGate = <String, int>{};
+    for (final r in results) {
+      if (r.horseNo > 0 && r.horseNo <= 30 && r.horseName.isNotEmpty) {
+        nameToGate[r.horseName] = r.horseNo;
+      }
+    }
+    if (nameToGate.isEmpty) return _buildGateMap(entries);
+
+    return {
+      for (var i = 0; i < entries.length; i++)
+        entries[i].horseNo: nameToGate[entries[i].horseName] ?? (i + 1),
+    };
+  }
+
   static double _findWinOdds(List<Odds> odds, int horseNo) {
     for (final o in odds) {
       if ((o.betType == 'WIN' || o.betType == '1') && o.horseNo1 == horseNo) {
@@ -982,12 +1189,14 @@ class _RacePacePreview extends StatelessWidget {
   final List<Prediction> predictions;
   final List<Odds> odds;
   final int distance;
+  final Map<int, int> gateByHorseNo;
 
   const _RacePacePreview({
     required this.entries,
     required this.predictions,
     required this.odds,
     required this.distance,
+    required this.gateByHorseNo,
   });
 
   String _getRunningStyle(RaceEntry entry, Prediction? pred) {
@@ -1219,8 +1428,13 @@ class _RacePacePreview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // 게이트 매핑은 상위에서 전달받아, 출마표/종합추천과 동일한 표시를 보장한다.
     final sorted = List<RaceEntry>.from(entries)
-      ..sort((a, b) => a.horseNo.compareTo(b.horseNo));
+      ..sort(
+        (a, b) => (gateByHorseNo[a.horseNo] ?? a.horseNo).compareTo(
+          gateByHorseNo[b.horseNo] ?? b.horseNo,
+        ),
+      );
 
     final horsePaces = <int, _HorsePaceData>{};
     final comprehensiveRankMap = _buildComprehensiveRankMap();
@@ -1285,7 +1499,10 @@ class _RacePacePreview extends StatelessWidget {
           ),
           const SizedBox(height: 16),
 
-          _PacePhaseSelector(horsePaces: horsePaces.values.toList()),
+          _PacePhaseSelector(
+            horsePaces: horsePaces.values.toList(),
+            gateByHorseNo: gateByHorseNo,
+          ),
           const SizedBox(height: 12),
 
           ...['선행', '선입', '중단', '추입', '후입'].map((style) {
@@ -1337,7 +1554,7 @@ class _RacePacePreview extends StatelessWidget {
                             ),
                           ),
                           child: Text(
-                            '${h.horseNo}',
+                            '${gateByHorseNo[h.horseNo] ?? h.horseNo}',
                             style: TextStyle(
                               fontSize: 13,
                               fontWeight: FontWeight.w800,
@@ -1532,7 +1749,7 @@ class _RacePacePreview extends StatelessWidget {
                                     borderRadius: BorderRadius.circular(4),
                                   ),
                                   child: Text(
-                                    '$no',
+                                    '${gateByHorseNo[no] ?? no}',
                                     style: TextStyle(
                                       fontSize: 12,
                                       fontWeight: FontWeight.w800,
@@ -1558,9 +1775,13 @@ class _RacePacePreview extends StatelessWidget {
 }
 
 class _PacePhaseSelector extends StatefulWidget {
-  const _PacePhaseSelector({required this.horsePaces});
+  const _PacePhaseSelector({
+    required this.horsePaces,
+    required this.gateByHorseNo,
+  });
 
   final List<_HorsePaceData> horsePaces;
+  final Map<int, int> gateByHorseNo;
 
   @override
   State<_PacePhaseSelector> createState() => _PacePhaseSelectorState();
@@ -1649,7 +1870,7 @@ class _PacePhaseSelectorState extends State<_PacePhaseSelector> {
                   ),
                 ),
                 child: Text(
-                  '$position위 ${horse.horseNo}번',
+                  '$position위 ${widget.gateByHorseNo[horse.horseNo] ?? horse.horseNo}번',
                   style: TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.w700,
@@ -1691,6 +1912,7 @@ class _ComprehensiveRecommendation extends StatelessWidget {
   final List<Prediction> predictions;
   final List<Odds> odds;
   final int distance;
+  final Map<int, int> gateByHorseNo;
 
   const _ComprehensiveRecommendation({
     required this.raceKey,
@@ -1698,6 +1920,7 @@ class _ComprehensiveRecommendation extends StatelessWidget {
     required this.predictions,
     required this.odds,
     required this.distance,
+    required this.gateByHorseNo,
   });
 
   Future<void> _saveRecommendations(List<_HorseRecommendation> recs) async {
@@ -1821,7 +2044,7 @@ class _ComprehensiveRecommendation extends StatelessWidget {
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: Text(
-                          '${rec.horseNo}번',
+                          '${gateByHorseNo[rec.horseNo] ?? rec.horseNo}번',
                           style: TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.w900,
@@ -1965,26 +2188,43 @@ class _ComprehensiveRecommendation extends StatelessWidget {
   }
 
   List<_HorseRecommendation> _analyzeAndRecommend() {
-    final recs = <_HorseRecommendation>[];
-    if (entries.isEmpty) return recs;
+    if (entries.isEmpty) return const [];
 
-    // 1. 경주 내 상대적 위치 분석
-    final ratings = entries.map((e) => e.rating).toList()
-      ..sort((a, b) => b.compareTo(a));
-    final maxRating = ratings.isNotEmpty ? ratings.first : 100.0;
-    final avgRating = ratings.isNotEmpty
-        ? ratings.reduce((a, b) => a + b) / ratings.length
-        : 50.0;
+    // ─── 1) 보조 데이터 준비 ───
+    final predMap = <int, Prediction>{
+      for (final p in predictions) p.horseNo: p,
+    };
+    final oddsMap = <int, double>{};
+    for (final o in odds) {
+      if ((o.betType == 'WIN' || o.betType == '1') && o.rate > 0) {
+        oddsMap[o.horseNo1] = o.rate;
+      }
+    }
 
-    // 2. 전개 분석
+    double aiWin(RaceEntry e) => predMap[e.horseNo]?.winProbability ?? 0;
+    double aiPlace(RaceEntry e) => predMap[e.horseNo]?.placeProbability ?? 0;
+    double winOddsOf(RaceEntry e) => oddsMap[e.horseNo] ?? 0;
+    double marketProb(RaceEntry e) {
+      final w = winOddsOf(e);
+      return w > 0 ? (100 / w).clamp(0.0, 100.0) : 0.0;
+    }
+
+    bool hasVariance(Iterable<double> xs) {
+      final set = xs.map((v) => v.toStringAsFixed(2)).toSet();
+      return set.length > 1;
+    }
+
+    final ratingHasInfo = hasVariance(entries.map((e) => e.rating));
+    final racesHasInfo = entries.any((e) => e.totalRaces > 0);
+    final aiHasInfo = hasVariance(entries.map(aiPlace));
+    final oddsHasInfo = oddsMap.length >= 2;
+
+    // ─── 2) 전개 분석 (기존 로직 유지) ───
     final runningStyles = <int, String>{};
     final frontRunners = <int>[];
     final closers = <int>[];
-
     for (final entry in entries) {
-      final pred = predictions
-          .where((p) => p.horseNo == entry.horseNo)
-          .firstOrNull;
+      final pred = predMap[entry.horseNo];
       final style = _getRunningStyle(entry, pred);
       runningStyles[entry.horseNo] = style;
       if (style == '선행' || style == '선입') {
@@ -1993,219 +2233,199 @@ class _ComprehensiveRecommendation extends StatelessWidget {
         closers.add(entry.horseNo);
       }
     }
-
     final isFrontHeavy =
         frontRunners.length >= 4 ||
         (frontRunners.length >= 3 && entries.length <= 10);
     final isCloserFavored = closers.length >= 3 && frontRunners.length <= 2;
 
-    // 3. 배당률 분석 (낮은 배당 = 인기마)
-    final oddsMap = <int, double>{};
-    for (final o in odds) {
-      if ((o.betType == 'WIN' || o.betType == '1') && o.rate > 0) {
-        oddsMap[o.horseNo1] = o.rate;
+    // ─── 3) 랭크 기반 점수 헬퍼 ───
+    // 상위(=signal 값이 클수록)일수록 maxPts, 하위일수록 maxPts*0.2 를 부여한다.
+    Map<int, double> rankPoints(
+      double Function(RaceEntry) signal,
+      double maxPts,
+    ) {
+      final sorted = [...entries]
+        ..sort((a, b) => signal(b).compareTo(signal(a)));
+      final result = <int, double>{};
+      final n = sorted.length;
+      for (var i = 0; i < n; i++) {
+        final t = n == 1 ? 1.0 : 1.0 - i / (n - 1);
+        final pts = (maxPts * 0.25) + (maxPts * 0.75) * t;
+        result[sorted[i].horseNo] = double.parse(pts.toStringAsFixed(1));
       }
+      return result;
     }
-    final hasOdds = oddsMap.isNotEmpty;
-    final avgOdds = hasOdds
-        ? oddsMap.values.reduce((a, b) => a + b) / oddsMap.length
-        : 10.0;
 
-    for (final entry in entries) {
-      final reasons = <String>[];
-      final pred = predictions
-          .where((p) => p.horseNo == entry.horseNo)
-          .firstOrNull;
-      final style = runningStyles[entry.horseNo] ?? '중단';
-      final winOdds = oddsMap[entry.horseNo] ?? 0;
+    int rankOf(double Function(RaceEntry) signal, RaceEntry target) {
+      final sorted = [...entries]
+        ..sort((a, b) => signal(b).compareTo(signal(a)));
+      return sorted.indexWhere((e) => e.horseNo == target.horseNo) + 1;
+    }
 
-      // ═══════════════════════════════════════════════════
-      // 1. 레이팅 점수 (25점) - 상대적 위치 기반
-      // ═══════════════════════════════════════════════════
-      double ratingScore = 0;
-      final ratingRank = ratings.indexOf(entry.rating) + 1;
-      final ratingPercentile = entry.rating / maxRating;
+    // ─── 4) 컴포넌트별 점수 산정 ───
+    // (a) 레이팅: 1순위 rating, 대체 신호로 AI 우승확률
+    double ratingSignal(RaceEntry e) =>
+        ratingHasInfo ? e.rating : aiWin(e);
+    final ratingPts = rankPoints(ratingSignal, 25);
 
-      if (ratingRank <= 2 && entry.rating >= 80) {
-        ratingScore = 25;
-        reasons.add('레이팅 $ratingRank위 (${entry.rating.toStringAsFixed(0)})');
-      } else if (ratingRank <= 3 && entry.rating >= 70) {
-        ratingScore = 22;
-        reasons.add('레이팅 상위권');
-      } else if (ratingPercentile >= 0.85) {
-        ratingScore = 20;
-      } else if (ratingPercentile >= 0.7) {
-        ratingScore = 15;
-      } else if (entry.rating >= avgRating) {
-        ratingScore = 10;
-      } else {
-        ratingScore = 5;
+    // (b) 성적: 승률·입상률·경험. 데이터 없으면 AI 입상확률
+    double perfSignal(RaceEntry e) {
+      if (racesHasInfo && e.totalRaces > 0) {
+        return e.winRate * 1.2 + e.placeRate * 0.6 + e.totalRaces * 0.4;
       }
+      return aiPlace(e);
+    }
+    final perfPts = rankPoints(perfSignal, 25);
 
-      // ═══════════════════════════════════════════════════
-      // 2. 성적 점수 (25점) - 승률 + 입상률 + 경험
-      // ═══════════════════════════════════════════════════
-      double performanceScore = 0;
-      final winRate = entry.winRate;
-      final placeRate = entry.placeRate;
-      final totalRaces = entry.totalRaces;
+    // (c) AI/배당 (기존 '기수' 자리): AI 입상확률 + 시장확률 가중평균
+    double aiOddsSignal(RaceEntry e) {
+      final ap = aiPlace(e);
+      final mp = marketProb(e);
+      if (oddsHasInfo && aiHasInfo) return ap * 0.6 + mp * 0.4;
+      if (oddsHasInfo) return mp;
+      if (aiHasInfo) return ap;
+      return e.rating; // 둘 다 없으면 rating 으로 폴백
+    }
+    final aiOddsPts = rankPoints(aiOddsSignal, 20);
 
-      // 승률 기반 (15점)
-      if (winRate >= 30) {
-        performanceScore += 15;
-        reasons.add('고승률 ${winRate.toStringAsFixed(0)}%');
-      } else if (winRate >= 20) {
-        performanceScore += 12;
-        reasons.add('승률 ${winRate.toStringAsFixed(0)}%');
-      } else if (winRate >= 10) {
-        performanceScore += 8;
-      } else if (winRate > 0) {
-        performanceScore += 4;
+    // (d) 거리: 출주 경험·승수. 없으면 부담중량(주행 능력 추정) → AI 우승확률
+    double distSignal(RaceEntry e) {
+      if (racesHasInfo && e.totalRaces > 0) {
+        return e.winCount * 6 + e.placeCount * 3 + e.totalRaces * 0.5;
       }
+      return aiWin(e);
+    }
+    final distPts = rankPoints(distSignal, 15);
 
-      // 입상률 기반 (7점)
-      if (placeRate >= 50) {
-        performanceScore += 7;
-        if (winRate < 15) {
-          reasons.add('안정적 입상 ${placeRate.toStringAsFixed(0)}%');
-        }
-      } else if (placeRate >= 35) {
-        performanceScore += 5;
-      } else if (placeRate >= 20) {
-        performanceScore += 3;
-      }
-
-      // 경험치 보너스 (3점)
-      if (totalRaces >= 20 && entry.winCount >= 3) {
-        performanceScore += 3;
-        reasons.add('풍부한 경험 ($totalRaces전 ${entry.winCount}승)');
-      } else if (totalRaces >= 10) {
-        performanceScore += 2;
-      } else if (totalRaces >= 5) {
-        performanceScore += 1;
-      }
-
-      // ═══════════════════════════════════════════════════
-      // 3. AI 예측 + 배당 점수 (20점)
-      // ═══════════════════════════════════════════════════
-      double jockeyScore = 0;
-
-      // AI 입상 예측 (12점)
-      if (pred != null && pred.placeProbability > 0) {
-        if (pred.placeProbability >= 45) {
-          jockeyScore += 12;
-          reasons.add('AI 입상 1순위 예측');
-        } else if (pred.placeProbability >= 35) {
-          jockeyScore += 10;
-          reasons.add('AI 입상 상위 예측');
-        } else if (pred.placeProbability >= 25) {
-          jockeyScore += 7;
-        } else if (pred.placeProbability >= 15) {
-          jockeyScore += 4;
-        }
-      }
-      if (pred != null && pred.placeProbability > 0) {
-        jockeyScore += (pred.placeProbability / 100 * 5).clamp(0, 5);
-      }
-
-      // 배당률 분석 (8점) - 낮은 배당 = 인기마
-      if (hasOdds && winOdds > 0) {
-        if (winOdds <= 3.0) {
-          jockeyScore += 8;
-          reasons.add('1번 인기 (${winOdds.toStringAsFixed(1)}배)');
-        } else if (winOdds <= 5.0) {
-          jockeyScore += 6;
-          reasons.add('상위 인기마');
-        } else if (winOdds <= avgOdds) {
-          jockeyScore += 4;
-        } else if (winOdds <= avgOdds * 2) {
-          jockeyScore += 2;
-        }
-      } else if (pred != null) {
-        // 배당 없으면 AI 예측으로 보정
-        jockeyScore += (pred.placeProbability / 100 * 8).clamp(0, 8);
-      }
-
-      // ═══════════════════════════════════════════════════
-      // 4. 거리 적성 점수 (15점)
-      // ═══════════════════════════════════════════════════
-      double distanceScore = 0;
-
-      // 해당 거리에서의 승리 경험
-      if (entry.winCount >= 2 && totalRaces >= 5) {
-        distanceScore = 15;
-        reasons.add('해당 거리 적성 우수');
-      } else if (entry.winCount >= 1 && totalRaces >= 3) {
-        distanceScore = 12;
-      } else if (totalRaces >= 5 && placeRate >= 30) {
-        distanceScore = 10;
-        reasons.add('거리 경험 풍부');
-      } else if (totalRaces >= 3) {
-        distanceScore = 7;
-      } else if (totalRaces >= 1) {
-        distanceScore = 4;
-      } else {
-        distanceScore = 2; // 첫 출전
-      }
-
-      // ═══════════════════════════════════════════════════
-      // 5. 전개 유리 점수 (15점)
-      // ═══════════════════════════════════════════════════
-      double paceScore = 5; // 기본점
-
+    // (e) 전개: 분위기 + style + rating 보정
+    double paceSignal(RaceEntry e) {
+      final style = runningStyles[e.horseNo] ?? '중단';
+      double base = 0;
       if (isFrontHeavy) {
-        // 선행마 많음 → 추입마 유리
-        if (style == '추입' || style == '후입') {
-          paceScore = 15;
-          reasons.add('전개 유리 (추입)');
-        } else if (style == '중단') {
-          paceScore = 10;
-        } else {
-          paceScore = 3; // 선행은 불리
-        }
+        base = switch (style) {
+          '추입' || '후입' => 90,
+          '중단' => 60,
+          '선행' || '선입' => 20,
+          _ => 40,
+        };
       } else if (isCloserFavored || frontRunners.length <= 1) {
-        // 선행마 적음 → 선행마 유리
-        if (style == '선행' || style == '선입') {
-          paceScore = 15;
-          reasons.add('전개 유리 (선행)');
-        } else if (style == '중단') {
-          paceScore = 8;
-        }
+        base = switch (style) {
+          '선행' || '선입' => 90,
+          '중단' => 55,
+          '추입' || '후입' => 35,
+          _ => 40,
+        };
       } else {
-        // 균형 전개
-        if (ratingRank <= 3) {
-          paceScore = 10; // 상위 레이팅은 균형 전개에서도 유리
-        } else {
-          paceScore = 7;
+        base = switch (style) {
+          '중단' => 60,
+          '선입' => 55,
+          '선행' || '추입' => 50,
+          _ => 45,
+        };
+      }
+      // 레이팅 상위는 어떤 전개에서도 약간 가산
+      if (ratingHasInfo) {
+        final rRank = rankOf((x) => x.rating, e);
+        base += (entries.length - rRank) * 0.5;
+      }
+      return base;
+    }
+    final pacePts = rankPoints(paceSignal, 15);
+
+    // ─── 5) 사유(reason) 빌더 ───
+    List<String> buildReasons(RaceEntry e) {
+      final reasons = <String>[];
+      final pred = predMap[e.horseNo];
+
+      // 레이팅 관련
+      if (ratingHasInfo) {
+        final r = rankOf((x) => x.rating, e);
+        if (r <= 2 && e.rating > 0) {
+          reasons.add('레이팅 $r위 (${e.rating.toStringAsFixed(0)})');
+        } else if (r <= 3 && e.rating > 0) {
+          reasons.add('레이팅 상위권');
         }
       }
 
-      // ═══════════════════════════════════════════════════
-      // 종합 점수 계산
-      // ═══════════════════════════════════════════════════
-      final totalScore =
-          ratingScore +
-          performanceScore +
-          jockeyScore +
-          distanceScore +
-          paceScore;
+      // 성적 관련
+      if (racesHasInfo && e.totalRaces > 0) {
+        if (e.winRate >= 25) {
+          reasons.add('고승률 ${e.winRate.toStringAsFixed(0)}%');
+        } else if (e.winRate >= 15) {
+          reasons.add('승률 ${e.winRate.toStringAsFixed(0)}%');
+        }
+        if (e.placeRate >= 50 && e.winRate < 15) {
+          reasons.add('안정적 입상 ${e.placeRate.toStringAsFixed(0)}%');
+        }
+        if (e.totalRaces >= 20 && e.winCount >= 3) {
+          reasons.add('풍부한 경험 (${e.totalRaces}전 ${e.winCount}승)');
+        }
+      }
 
+      // AI 관련
+      if (pred != null && pred.placeProbability > 0) {
+        final r = rankOf(aiPlace, e);
+        if (r == 1) {
+          reasons.add('AI 입상 1순위 예측');
+        } else if (r <= 3) {
+          reasons.add('AI 입상 상위 예측');
+        }
+      }
+
+      // 배당 관련
+      final wo = winOddsOf(e);
+      if (wo > 0) {
+        final r = rankOf(marketProb, e);
+        if (r == 1) {
+          reasons.add('1번 인기 (${wo.toStringAsFixed(1)}배)');
+        } else if (r <= 3) {
+          reasons.add('상위 인기마');
+        }
+      }
+
+      // 전개 유리
+      final style = runningStyles[e.horseNo] ?? '중단';
+      if (isFrontHeavy && (style == '추입' || style == '후입')) {
+        reasons.add('전개 유리 (추입)');
+      } else if ((isCloserFavored || frontRunners.length <= 1) &&
+          (style == '선행' || style == '선입')) {
+        reasons.add('전개 유리 (선행)');
+      }
+
+      // 데이터가 비어 사유가 전혀 없을 때, 종합 신호로 한 줄을 채워 둔다.
+      if (reasons.isEmpty) {
+        if (pred != null && pred.placeProbability > 0) {
+          reasons.add('AI 입상 ${pred.placeProbability.toStringAsFixed(0)}%');
+        } else if (wo > 0) {
+          reasons.add('배당 ${wo.toStringAsFixed(1)}배');
+        }
+      }
+      return reasons;
+    }
+
+    // ─── 6) 결과 합산 ───
+    final recs = <_HorseRecommendation>[];
+    for (final e in entries) {
+      final rs = ratingPts[e.horseNo] ?? 0;
+      final ps = perfPts[e.horseNo] ?? 0;
+      final js = aiOddsPts[e.horseNo] ?? 0;
+      final ds = distPts[e.horseNo] ?? 0;
+      final cs = pacePts[e.horseNo] ?? 0;
       recs.add(
         _HorseRecommendation(
-          horseNo: entry.horseNo,
-          horseName: entry.horseName,
-          totalScore: totalScore,
-          ratingScore: ratingScore,
-          performanceScore: performanceScore,
-          jockeyScore: jockeyScore,
-          distanceScore: distanceScore,
-          paceScore: paceScore,
-          reasons: reasons,
+          horseNo: e.horseNo,
+          horseName: e.horseName,
+          totalScore: rs + ps + js + ds + cs,
+          ratingScore: rs,
+          performanceScore: ps,
+          jockeyScore: js,
+          distanceScore: ds,
+          paceScore: cs,
+          reasons: buildReasons(e),
         ),
       );
     }
 
-    // 점수순 정렬 + 동점시 레이팅 높은 순
     recs.sort((a, b) {
       final scoreDiff = b.totalScore.compareTo(a.totalScore);
       if (scoreDiff != 0) return scoreDiff;
@@ -2514,24 +2734,44 @@ class _ScoreBadge extends StatelessWidget {
 
 class _HorseCard extends StatelessWidget {
   final RaceEntry entry;
+  final int displayNo;
   final double winOdds;
   final Prediction? prediction;
   final int predictionRank;
   final int distance;
+  final HorseStatsSnapshot? stats;
+  final bool statsLoading;
   final VoidCallback onTap;
 
   const _HorseCard({
     required this.entry,
+    required this.displayNo,
     required this.winOdds,
     this.prediction,
     this.predictionRank = 0,
     this.distance = 0,
+    this.stats,
+    this.statsLoading = false,
     required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
     final isTop = predictionRank >= 1 && predictionRank <= 3;
+
+    // entrySheet 통계가 비어도 raceHorseStatsProvider 의 배치 결과로 보강한다.
+    final totalRaces = (stats?.totalRaces ?? 0) > 0
+        ? stats!.totalRaces
+        : entry.totalRaces;
+    final winCount = (stats?.totalRaces ?? 0) > 0
+        ? stats!.winCount
+        : entry.winCount;
+    final placeCount = (stats?.totalRaces ?? 0) > 0
+        ? stats!.placeCount
+        : entry.placeCount;
+    final winRate = totalRaces > 0 ? winCount / totalRaces * 100 : 0.0;
+    final placeRate =
+        totalRaces > 0 ? (winCount + placeCount) / totalRaces * 100 : 0.0;
 
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
@@ -2546,7 +2786,7 @@ class _HorseCard extends StatelessWidget {
               // ── 1행: 마번 + 말이름/기수 ──
               Row(
                 children: [
-                  _HorseNumberBadge(no: entry.horseNo, isTop: isTop),
+                  _HorseNumberBadge(no: displayNo, isTop: isTop),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Column(
@@ -2647,10 +2887,10 @@ class _HorseCard extends StatelessWidget {
 
               const SizedBox(height: 12),
 
-              // ── 2행: 핵심 5개 스탯 (마번, 레이팅, 승률, 배당, AI예측) ──
+              // ── 2행: 핵심 스탯 (레이팅 · 전적 · 승률 · 입상률 · 배당) ──
               Container(
                 padding: const EdgeInsets.symmetric(
-                  horizontal: 8,
+                  horizontal: 6,
                   vertical: 10,
                 ),
                 decoration: BoxDecoration(
@@ -2669,20 +2909,26 @@ class _HorseCard extends StatelessWidget {
                     _statDivider(),
                     _StatColumn(
                       label: '전적',
-                      value: entry.totalRaces > 0
-                          ? '${entry.totalRaces}전${entry.winCount}승${entry.placeCount}복'
-                          : '-',
+                      value: totalRaces > 0
+                          ? '$totalRaces전$winCount승$placeCount복'
+                          : (statsLoading ? '…' : '-'),
                       color: Colors.white70,
                     ),
                     _statDivider(),
                     _StatColumn(
-                      label: entry.winCount > 0 ? '승률' : '입상률',
-                      value: entry.totalRaces > 0
-                          ? entry.winCount > 0
-                                ? '${entry.winRate.toStringAsFixed(1)}%'
-                                : '${entry.placeRate.toStringAsFixed(1)}%'
-                          : '-',
+                      label: '승률',
+                      value: totalRaces > 0
+                          ? '${winRate.toStringAsFixed(1)}%'
+                          : (statsLoading ? '…' : '-'),
                       color: AppTheme.positiveGreen,
+                    ),
+                    _statDivider(),
+                    _StatColumn(
+                      label: '입상률',
+                      value: totalRaces > 0
+                          ? '${placeRate.toStringAsFixed(1)}%'
+                          : (statsLoading ? '…' : '-'),
+                      color: Colors.lightBlueAccent,
                     ),
                     _statDivider(),
                     _StatColumn(
@@ -2719,10 +2965,11 @@ class _HorseCard extends StatelessWidget {
                           ),
                         if (distance > 0)
                           _MiniChip('${distance}m', AppTheme.accentGold),
-                        _MiniChip(
-                          '${entry.totalRaces}전 ${entry.winCount}승 ${entry.placeCount}복',
-                          Colors.grey.shade400,
-                        ),
+                        if (winOdds > 0)
+                          _MiniChip(
+                            '배당확률 ${(100 / winOdds).toStringAsFixed(1)}%',
+                            AppTheme.accentGold,
+                          ),
                       ],
                     ),
                   ),
@@ -2919,6 +3166,7 @@ class _NumberRecommender extends StatefulWidget {
   final List<RaceEntry> entries;
   final List<Prediction> predictions;
   final double horizontalMargin;
+  final Map<int, int>? gateByHorseNo;
 
   const _NumberRecommender({
     super.key,
@@ -2926,6 +3174,7 @@ class _NumberRecommender extends StatefulWidget {
     required this.entries,
     required this.predictions,
     this.horizontalMargin = 14,
+    this.gateByHorseNo,
   });
 
   @override
@@ -3050,6 +3299,12 @@ class _NumberRecommenderState extends State<_NumberRecommender> {
     if (allNos.isEmpty || !_loaded) return const SizedBox.shrink();
     final hasAny = _selectedSet.isNotEmpty;
 
+    // 5자리 마번이 보이지 않도록, 출주표 정렬 위치(1자리)를 표시 번호로 사용한다.
+    final gateMap =
+        widget.gateByHorseNo ?? RaceEntryScreen._buildGateMap(widget.entries);
+    String displayNo(int horseNo) =>
+        (gateMap[horseNo] ?? horseNo).toString();
+
     return Container(
       margin: EdgeInsets.symmetric(horizontal: widget.horizontalMargin),
       padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
@@ -3172,7 +3427,7 @@ class _NumberRecommenderState extends State<_NumberRecommender> {
                           const SizedBox(height: 2),
                           if (filled)
                             Text(
-                              '$no',
+                              displayNo(no),
                               style: TextStyle(
                                 fontSize: 18,
                                 fontWeight: FontWeight.w900,
@@ -3238,7 +3493,7 @@ class _NumberRecommenderState extends State<_NumberRecommender> {
                                   mainAxisAlignment: MainAxisAlignment.center,
                                   children: [
                                     Text(
-                                      '$no',
+                                      displayNo(no),
                                       style: TextStyle(
                                         fontSize: 20,
                                         fontWeight: FontWeight.w900,

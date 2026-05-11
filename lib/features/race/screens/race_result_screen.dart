@@ -230,13 +230,14 @@ class RaceResultScreen extends ConsumerWidget {
                       ),
                     ),
 
-                    ...sorted.map(
-                      (r) => _DetailedResultCard(
-                        result: r,
-                        prediction: _findPrediction(predictions, r.horseNo),
+                    ...sorted.asMap().entries.map(
+                      (e) => _DetailedResultCard(
+                        result: e.value,
+                        displayRank: e.key + 1,
+                        prediction: _findPrediction(predictions, e.value.horseNo),
                         canViewPredictionRemark: canViewPredictionRemark,
                         onHorseTap: () => context.push(
-                          '/horse/${Uri.encodeComponent(r.horseName)}?meet=$meet',
+                          '/horse/${Uri.encodeComponent(e.value.horseName)}?meet=$meet',
                         ),
                       ),
                     ),
@@ -819,22 +820,54 @@ class _AiComparisonSectionState extends State<_AiComparisonSection> {
       return const SizedBox.shrink();
     }
 
+    // 결과 API 의 horseNo(=gtno)는 실제 게이트 번호이므로, 결과가 있을 때는
+    // 마명 매칭으로 게이트를 권위 있게 결정한다. 결과에 없는 말은 응답 인덱스로
+    // 폴백한다. (출주표 탭의 _buildGateMapWithResults 와 동일한 정책)
+    final nameToGate = <String, int>{};
+    for (final r in widget.results) {
+      if (r.horseNo > 0 && r.horseNo <= 30 && r.horseName.isNotEmpty) {
+        nameToGate[r.horseName] = r.horseNo;
+      }
+    }
+    final gateByHorseNo = <int, int>{
+      for (var i = 0; i < widget.entries.length; i++)
+        widget.entries[i].horseNo:
+            nameToGate[widget.entries[i].horseName] ?? (i + 1),
+    };
+    final nameByHorseNo = <int, String>{};
+    for (final e in widget.entries) {
+      if (e.horseName.isNotEmpty) nameByHorseNo[e.horseNo] = e.horseName;
+    }
+    for (final p in widget.predictions) {
+      if (p.horseName.isNotEmpty && !nameByHorseNo.containsKey(p.horseNo)) {
+        nameByHorseNo[p.horseNo] = p.horseName;
+      }
+    }
+
     final actualTop3 =
         widget.results.where((r) => r.rank >= 1 && r.rank <= 3).toList()
           ..sort((a, b) => a.rank.compareTo(b.rank));
     final actualTop3Sorted = actualTop3.take(3).toList();
+
+    int toGate(int horseNo) => gateByHorseNo[horseNo] ?? horseNo;
 
     // AI: 승률순 1·2·3착 pick vs 실제 1·2·3착(칸별 정확도)
     int aiPosHits = 0;
     for (int i = 0; i < 3; i++) {
       if (i >= sorted.length) break;
       final at = widget.results.where((r) => r.rank == i + 1).firstOrNull;
-      if (at != null && at.horseNo == sorted[i].horseNo) aiPosHits++;
+      if (at != null && at.horseNo == toGate(sorted[i].horseNo)) aiPosHits++;
     }
     final compTop3 = _compPicks.take(3).whereType<int>().toList();
-    final compHits = _countHits(compTop3, actualTop3Sorted);
+    final compHits = _countHits(
+      compTop3.map(toGate).toList(),
+      actualTop3Sorted,
+    );
     final userTop3 = _userPicks.take(3).whereType<int>().toList();
-    final userHits = _countHits(userTop3, actualTop3Sorted);
+    final userHits = _countHits(
+      userTop3.map(toGate).toList(),
+      actualTop3Sorted,
+    );
 
     double pct(int hits, int total) => total > 0 ? hits / total * 100 : 0;
     final aiAcc = pct(aiPosHits, 3);
@@ -969,6 +1002,8 @@ class _AiComparisonSectionState extends State<_AiComparisonSection> {
               compHorseNo: i < _compPicks.length ? _compPicks[i] : null,
               userHorseNo: i < _userPicks.length ? _userPicks[i] : null,
               actual: widget.results.where((r) => r.rank == i + 1).firstOrNull,
+              gateByHorseNo: gateByHorseNo,
+              nameByHorseNo: nameByHorseNo,
             ),
         ],
       ),
@@ -1023,6 +1058,8 @@ class _ComparisonRow extends StatelessWidget {
   final int? compHorseNo;
   final int? userHorseNo;
   final RaceResult? actual;
+  final Map<int, int> gateByHorseNo;
+  final Map<int, String> nameByHorseNo;
 
   const _ComparisonRow({
     required this.rank,
@@ -1030,18 +1067,47 @@ class _ComparisonRow extends StatelessWidget {
     this.compHorseNo,
     this.userHorseNo,
     this.actual,
+    required this.gateByHorseNo,
+    required this.nameByHorseNo,
   });
 
   @override
   Widget build(BuildContext context) {
-    final actualNo = actual?.horseNo;
-    final aiMatch =
-        predicted != null && actualNo != null && predicted!.horseNo == actualNo;
-    final compMatch =
-        compHorseNo != null && actualNo != null && compHorseNo == actualNo;
-    final userMatch =
-        userHorseNo != null && actualNo != null && userHorseNo == actualNo;
+    int? gateOf(int? horseNo) {
+      if (horseNo == null) return null;
+      return gateByHorseNo[horseNo] ?? horseNo;
+    }
+
+    String nameOf(int? horseNo, [String fallback = '']) {
+      if (horseNo == null) return '';
+      final n = nameByHorseNo[horseNo];
+      if (n != null && n.isNotEmpty) return n;
+      return fallback;
+    }
+
+    final aiGate = gateOf(predicted?.horseNo);
+    final compGate = gateOf(compHorseNo);
+    final userGate = gateOf(userHorseNo);
+    final actualGate = actual?.horseNo;
+
+    final aiName = nameOf(predicted?.horseNo, predicted?.horseName ?? '');
+    final compName = nameOf(compHorseNo);
+    final userName = nameOf(userHorseNo);
+    final actualName = actual?.horseName ?? '';
+
+    bool sameAsActual(int? gate, String name) {
+      if (actualGate == null) return false;
+      if (name.isNotEmpty && actualName.isNotEmpty && name == actualName) {
+        return true;
+      }
+      return gate != null && gate == actualGate;
+    }
+
+    final aiMatch = sameAsActual(aiGate, aiName);
+    final compMatch = sameAsActual(compGate, compName);
+    final userMatch = sameAsActual(userGate, userName);
     final anyMatch = aiMatch || compMatch || userMatch;
+
     final rankColors = [
       AppTheme.winColor,
       AppTheme.placeColor,
@@ -1051,8 +1117,8 @@ class _ComparisonRow extends StatelessWidget {
     ];
     final color = rankColors[(rank - 1).clamp(0, 4)];
 
-    Widget badge(int? no, bool matched) {
-      if (no == null) {
+    Widget cell(int? gate, bool matched) {
+      if (gate == null) {
         return Text('-', style: TextStyle(color: Colors.grey.shade600));
       }
       return Container(
@@ -1067,7 +1133,7 @@ class _ComparisonRow extends StatelessWidget {
                 ],
               )
             : null,
-        child: _HorseNumberBadge(no: no, size: 26),
+        child: _HorseNumberBadge(no: gate, size: 26),
       );
     }
 
@@ -1084,6 +1150,7 @@ class _ComparisonRow extends StatelessWidget {
             : null,
       ),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           Container(
             width: 24,
@@ -1104,10 +1171,10 @@ class _ComparisonRow extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 4),
-          Expanded(child: Center(child: badge(predicted?.horseNo, aiMatch))),
-          Expanded(child: Center(child: badge(compHorseNo, compMatch))),
-          Expanded(child: Center(child: badge(userHorseNo, userMatch))),
-          Expanded(child: Center(child: badge(actualNo, false))),
+          Expanded(child: Center(child: cell(aiGate, aiMatch))),
+          Expanded(child: Center(child: cell(compGate, compMatch))),
+          Expanded(child: Center(child: cell(userGate, userMatch))),
+          Expanded(child: Center(child: cell(actualGate, false))),
         ],
       ),
     );
@@ -1569,12 +1636,14 @@ class _RaceTimeAnalysis extends StatelessWidget {
 
 class _DetailedResultCard extends StatelessWidget {
   final RaceResult result;
+  final int displayRank;
   final Prediction? prediction;
   final bool canViewPredictionRemark;
   final VoidCallback onHorseTap;
 
   const _DetailedResultCard({
     required this.result,
+    required this.displayRank,
     this.prediction,
     required this.canViewPredictionRemark,
     required this.onHorseTap,
@@ -1625,25 +1694,14 @@ class _DetailedResultCard extends StatelessWidget {
                       ),
                     ),
                     child: Center(
-                      child: result.rank > 0
-                          ? Text(
-                              '${result.rank}',
-                              style: TextStyle(
-                                fontSize: 20,
-                                fontWeight: FontWeight.w900,
-                                color: rankColor,
-                              ),
-                            )
-                          : Text(
-                              result.rankRaw.length > 2
-                                  ? result.rankRaw.substring(0, 2)
-                                  : result.rankRaw,
-                              style: TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w700,
-                                color: Colors.grey.shade500,
-                              ),
-                            ),
+                      child: Text(
+                        '$displayRank',
+                        style: TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.w900,
+                          color: rankColor,
+                        ),
+                      ),
                     ),
                   ),
                   const SizedBox(width: 10),
@@ -1705,67 +1763,68 @@ class _DetailedResultCard extends StatelessWidget {
 
               const SizedBox(height: 10),
 
-              // 2행: 상세 스탯
-              if (_hasAnyStats()) ...[
-                const SizedBox(height: 10),
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 4,
-                  children: [
-                    if (result.weight > 0)
-                      _StatChip(
-                        '부담중량',
-                        '${result.weight.toStringAsFixed(0)}kg',
+              // 2행: 상세 스탯 (값이 없으면 '-' 로 표시해 입상마와 동일한 칩 구성 유지)
+              Wrap(
+                spacing: 6,
+                runSpacing: 4,
+                children: [
+                  _StatChip(
+                    '부담중량',
+                    result.weight > 0
+                        ? '${result.weight.toStringAsFixed(0)}kg'
+                        : '-',
+                  ),
+                  _StatChip(
+                    '마체중',
+                    result.horseWeight > 0
+                        ? '${result.horseWeight.toStringAsFixed(0)}kg'
+                        : '-',
+                  ),
+                  _StatChip(
+                    '단승',
+                    result.winOdds > 0
+                        ? '${result.winOdds.toStringAsFixed(1)}배'
+                        : '-',
+                    color: AppTheme.accentGold,
+                  ),
+                  _StatChip(
+                    '연승',
+                    result.placeOdds > 0
+                        ? '${result.placeOdds.toStringAsFixed(1)}배'
+                        : '-',
+                  ),
+                  if (prediction != null && prediction!.placeProbability > 0)
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 3,
                       ),
-                    if (result.horseWeight > 0)
-                      _StatChip(
-                        '마체중',
-                        '${result.horseWeight.toStringAsFixed(0)}kg',
+                      decoration: BoxDecoration(
+                        color: Colors.deepPurple.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(8),
                       ),
-                    if (result.winOdds > 0)
-                      _StatChip(
-                        '단승',
-                        '${result.winOdds.toStringAsFixed(1)}배',
-                        color: AppTheme.accentGold,
-                      ),
-                    if (result.placeOdds > 0)
-                      _StatChip(
-                        '연승',
-                        '${result.placeOdds.toStringAsFixed(1)}배',
-                      ),
-                    if (prediction != null && prediction!.placeProbability > 0)
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 3,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Colors.deepPurple.withValues(alpha: 0.12),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              Icons.auto_awesome,
-                              size: 11,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.auto_awesome,
+                            size: 11,
+                            color: Colors.purpleAccent.shade100,
+                          ),
+                          const SizedBox(width: 3),
+                          Text(
+                            '입상 ${prediction!.placeProbability.toStringAsFixed(1)}%',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
                               color: Colors.purpleAccent.shade100,
                             ),
-                            const SizedBox(width: 3),
-                            Text(
-                              '입상 ${prediction!.placeProbability.toStringAsFixed(1)}%',
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w700,
-                                color: Colors.purpleAccent.shade100,
-                              ),
-                            ),
-                          ],
-                        ),
+                          ),
+                        ],
                       ),
-                  ],
-                ),
-              ],
+                    ),
+                ],
+              ),
 
               // 3행: 통과순위 (있을 때만)
               if ((_hasValidStr(result.passOrder) && canViewPredictionRemark) ||
@@ -1807,13 +1866,6 @@ class _DetailedResultCard extends StatelessWidget {
       t.isNotEmpty && t != '0.0' && t != '0' && t != '0:00.0';
 
   static bool _hasValidStr(String s) => s.isNotEmpty && s != '0' && s != '0.0';
-
-  bool _hasAnyStats() =>
-      result.weight > 0 ||
-      result.horseWeight > 0 ||
-      result.winOdds > 0 ||
-      result.placeOdds > 0 ||
-      (prediction != null && prediction!.winProbability > 0);
 }
 
 class _StatChip extends StatelessWidget {

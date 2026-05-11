@@ -6,8 +6,8 @@ import '../../models/race_entry.dart';
 /// heuristic-3.1: 표본 보정 기반 로컬 예측
 /// 점수 차이를 극대화하여 실제 경마에 가까운 승률 분포를 생성
 class LocalPredictor {
-  /// `heuristic-place-1.1`부터 단승(WIN) 배당(있다면)을 점수에 섞습니다.
-  static const modelVersion = 'heuristic-place-1.1';
+  /// `heuristic-place-1.2`부터 승률 표시만 완만하게 상향 보정합니다.
+  static const modelVersion = 'heuristic-place-1.2';
   static const _params = _HeuristicParams(
     wRating: 0.324359,
     wPerformance: 0.371729,
@@ -20,6 +20,7 @@ class LocalPredictor {
     reliabilityPenalty: 0.174242,
   );
   static const _wMarket = 0.12;
+  static const _winProbabilityLift = 1.35;
 
   static PredictionReport generate({
     required String meet,
@@ -78,10 +79,20 @@ class LocalPredictor {
       odds: odds,
       entryHorseNos: entries.map((e) => e.horseNo).toSet(),
     );
-    final marketWeight = _effectiveMarketWeight(
+    var marketWeight = _effectiveMarketWeight(
       fieldSize: entries.length,
       marketByHorse: marketByHorse,
     );
+
+    // 출주표(rating/totalRaces 등)가 비어 base 점수의 분산이 거의 없을 때,
+    // 시장(배당) 가중을 자동으로 크게 올려 균등 분포(1/N)를 피한다.
+    final fundamentalSignalAbsent =
+        (maxRating - minRating).abs() < 1e-6 &&
+        entries.every((e) => e.totalRaces == 0) &&
+        (maxPrize - minPrize).abs() < 1e-6;
+    if (fundamentalSignalAbsent && marketByHorse.length >= 2) {
+      marketWeight = 0.9;
+    }
 
     for (final entry in entries) {
       final style = styles[entry.horseNo] ?? '중단';
@@ -139,7 +150,7 @@ class LocalPredictor {
           (conditionScore * _params.wCondition);
 
       final marketComp = marketByHorse[entry.horseNo] ?? 0.5;
-      final s = 1.0 - _wMarket;
+      final s = (1.0 - marketWeight).clamp(0.0, 1.0);
       final scaledBase = base0to1 * s;
       final blended0to1 = marketWeight > 0
           ? (scaledBase + (marketComp * marketWeight))
@@ -187,6 +198,9 @@ class LocalPredictor {
       final entry = entries[i];
       final style = styles[entry.horseNo] ?? '중단';
       final winProb = probabilities[i];
+      final adjustedWinProb = (winProb * _winProbabilityLift)
+          .clamp(0.0, 95.0)
+          .toDouble();
       final rank = rankedHorseNos.indexOf(entry.horseNo) + 1;
       final placeProb = _calcPlaceProb(
         winProb: winProb,
@@ -197,7 +211,7 @@ class LocalPredictor {
       final tags = _generateTags(
         entry,
         style,
-        winProb,
+        adjustedWinProb,
         placeProb,
         avgRating,
         pacePressure,
@@ -208,7 +222,7 @@ class LocalPredictor {
           horseNo: entry.horseNo,
           horseName: entry.horseName,
           jockeyName: entry.jockeyName,
-          winProbability: double.parse(winProb.toStringAsFixed(1)),
+          winProbability: double.parse(adjustedWinProb.toStringAsFixed(1)),
           placeProbability: double.parse(placeProb.toStringAsFixed(1)),
           tags: tags,
           featureImportance: featureImportanceByHorseNo[entry.horseNo] ?? {},
