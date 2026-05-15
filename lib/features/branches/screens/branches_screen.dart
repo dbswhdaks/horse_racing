@@ -55,8 +55,7 @@ class _BranchesScreenState extends ConsumerState<BranchesScreen> {
             tooltip: '위치 새로고침',
             onPressed: location.status == LocationStatus.loading
                 ? null
-                : () =>
-                      ref.read(locationControllerProvider.notifier).refresh(),
+                : () => ref.read(locationControllerProvider.notifier).refresh(),
             icon: location.status == LocationStatus.loading
                 ? const SizedBox(
                     width: 18,
@@ -73,9 +72,8 @@ class _BranchesScreenState extends ConsumerState<BranchesScreen> {
             _StatusBanner(location: location),
             _CategoryFilterChips(
               selected: filter,
-              onChanged: (value) => ref
-                  .read(branchCategoryFilterProvider.notifier)
-                  .state = value,
+              onChanged: (value) =>
+                  ref.read(branchCategoryFilterProvider.notifier).state = value,
             ),
             const Divider(height: 1),
             Expanded(
@@ -96,14 +94,11 @@ class _BranchesScreenState extends ConsumerState<BranchesScreen> {
                         return _BranchTile(
                           item: item,
                           rank: index + 1,
-                          showDistance:
-                              location.status == LocationStatus.ready,
-                          onOpenMap: (mode) =>
-                              _openNaverDirections(item, mode),
+                          showDistance: location.status == LocationStatus.ready,
+                          onOpenMap: (mode) => _openNaverDirections(item, mode),
                           onCopyAddress: () => _copyAddress(item.branch),
                           onCallPhone: () => _callPhone(item.branch),
-                          onParking: () =>
-                              _openNaverParkingSearch(item.branch),
+                          onParking: () => _openNaverParkingSearch(item.branch),
                         );
                       },
                     ),
@@ -155,9 +150,9 @@ class _BranchesScreenState extends ConsumerState<BranchesScreen> {
     );
     final ok = await launchUrl(webUri, mode: LaunchMode.externalApplication);
     if (!ok && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('네이버 지도를 열 수 없습니다.')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('네이버 지도를 열 수 없습니다.')));
     }
   }
 
@@ -188,27 +183,27 @@ class _BranchesScreenState extends ConsumerState<BranchesScreen> {
     );
     final ok = await launchUrl(webUri, mode: LaunchMode.externalApplication);
     if (!ok && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('네이버 지도를 열 수 없습니다.')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('네이버 지도를 열 수 없습니다.')));
     }
   }
 
   Future<void> _copyAddress(KraBranch branch) async {
     await Clipboard.setData(ClipboardData(text: branch.address));
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('${branch.name} 주소를 복사했습니다.')),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text('${branch.name} 주소를 복사했습니다.')));
   }
 
   Future<void> _callPhone(KraBranch branch) async {
     final uri = Uri(scheme: 'tel', path: branch.phone);
     final ok = await launchUrl(uri);
     if (!ok && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('전화 앱을 열 수 없습니다.')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('전화 앱을 열 수 없습니다.')));
     }
   }
 }
@@ -284,10 +279,7 @@ class _StatusBanner extends StatelessWidget {
 }
 
 class _CategoryFilterChips extends StatelessWidget {
-  const _CategoryFilterChips({
-    required this.selected,
-    required this.onChanged,
-  });
+  const _CategoryFilterChips({required this.selected, required this.onChanged});
 
   final KraBranchCategory? selected;
   final ValueChanged<KraBranchCategory?> onChanged;
@@ -389,11 +381,7 @@ class _BranchTile extends StatelessWidget {
               border: Border.all(color: color.withValues(alpha: 0.5)),
             ),
             alignment: Alignment.center,
-            child: Icon(
-              _categoryIcon(branch.category),
-              size: 20,
-              color: color,
-            ),
+            child: Icon(_categoryIcon(branch.category), size: 20, color: color),
           ),
           const SizedBox(width: 12),
           Expanded(
