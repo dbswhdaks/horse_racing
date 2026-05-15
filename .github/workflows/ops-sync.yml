@@ -1,6 +1,6 @@
 # KRA → Supabase 배당(odds) 백필 + 휴리스틱 predictions(1.1) 동기화
 # (주간 휴리스틱 튜닝: `scheduled-tune.yml`)
-# GitHub: Settings → Secrets → Actions 에 다음을 등록하세요.
+# GitHub: Settings → Secrets and variables → Actions 에 다음을 등록하세요.
 #   SUPABASE_URL, SUPABASE_SERVICE_KEY, KRA_SERVICE_KEY
 name: ops-sync
 
@@ -9,6 +9,10 @@ on:
   schedule:
     # UTC 01:00 ≈ KST 10:00
     - cron: "0 1 * * *"
+
+# Node.js 20 deprecation 경고 회피: 가능 시 Node.js 24 로 액션 실행.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
   sync:
@@ -19,6 +23,22 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
+      - name: Verify required secrets
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          KRA_SERVICE_KEY: ${{ secrets.KRA_SERVICE_KEY }}
+        run: |
+          missing=()
+          [ -z "$SUPABASE_URL" ] && missing+=("SUPABASE_URL")
+          [ -z "$SUPABASE_SERVICE_KEY" ] && missing+=("SUPABASE_SERVICE_KEY")
+          [ -z "$KRA_SERVICE_KEY" ] && missing+=("KRA_SERVICE_KEY")
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::필수 secret 누락: ${missing[*]} — Settings → Secrets and variables → Actions 에서 등록하세요."
+            exit 1
+          fi
+          echo "secrets OK"
 
       - name: Install dependencies
         run: pip install -r backend/requirements.txt
