@@ -203,15 +203,25 @@ class RaceEntryScreen extends ConsumerWidget {
     AsyncValue<PredictionReport?> predAsync,
     bool canViewPacePreview,
   ) {
+    Widget shimmer() => ListView(
+      padding: const EdgeInsets.all(12),
+      children: const [
+        ShimmerLoading(height: 200),
+        SizedBox(height: 10),
+        ShimmerLoading(height: 300),
+      ],
+    );
+
+    // 종합추천 카드는 entries 와 AI 예측을 함께 사용해 점수를 매긴다.
+    // entries 만 먼저 도착해 그리면, AI 예측이 뒤따라 들어오는 순간
+    // 추천 순위·점수가 재계산되어 화면이 "한 번 끊겼다가 다시 자세하게"
+    // 보이는 깜빡임이 생긴다. 두 데이터가 모두 준비된 뒤 한 번에 그린다.
+    if (entriesAsync.isLoading || predAsync.isLoading) {
+      return shimmer();
+    }
+
     return entriesAsync.when(
-      loading: () => ListView(
-        padding: const EdgeInsets.all(12),
-        children: const [
-          ShimmerLoading(height: 200),
-          SizedBox(height: 10),
-          ShimmerLoading(height: 300),
-        ],
-      ),
+      loading: shimmer,
       error: (err, _) => Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,

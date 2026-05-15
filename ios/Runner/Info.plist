@@ -45,5 +45,12 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>가까운 경마장·장외발매소를 거리순으로 보여드리기 위해 위치 정보를 사용합니다.</string>
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>nmap</string>
+		<string>tel</string>
+	</array>
 </dict>
 </plist>

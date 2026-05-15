@@ -22,6 +22,7 @@ class HomeScreen extends ConsumerStatefulWidget {
 class _HomeScreenState extends ConsumerState<HomeScreen>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
+  final _scaffoldKey = GlobalKey<ScaffoldState>();
   final _meets = ['1', '2', '3'];
   final _meetLabels = ['서울', '제주', '부산경남'];
 
@@ -50,6 +51,17 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     final isToday = _isSameDay(selectedDate, DateTime.now());
 
     return Scaffold(
+      key: _scaffoldKey,
+      endDrawer: _AppDrawer(
+        onProfileTap: () {
+          Navigator.of(context).pop();
+          context.push('/profile');
+        },
+        onBranchesTap: () {
+          Navigator.of(context).pop();
+          context.push('/branches');
+        },
+      ),
       body: SafeArea(
         child: NestedScrollView(
           headerSliverBuilder: (context, innerBoxIsScrolled) => [
@@ -86,9 +98,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 Padding(
                   padding: const EdgeInsets.only(top: 24, right: 8),
                   child: IconButton(
-                    icon: const Icon(Icons.account_circle_outlined),
-                    tooltip: '프로필',
-                    onPressed: () => context.push('/profile'),
+                    icon: const Icon(Icons.menu_rounded),
+                    tooltip: '메뉴',
+                    onPressed: () => _scaffoldKey.currentState?.openEndDrawer(),
                     padding: EdgeInsets.zero,
                     visualDensity: VisualDensity.compact,
                     constraints: const BoxConstraints(
@@ -243,7 +255,86 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     text.writeln('\n경마 Plus 앱에서 확인하세요!');
     SharePlus.instance.share(ShareParams(text: text.toString()));
   }
+}
 
+// ── 햄버거(엔드) 드로어 ──
+
+class _AppDrawer extends StatelessWidget {
+  const _AppDrawer({
+    required this.onProfileTap,
+    required this.onBranchesTap,
+  });
+
+  final VoidCallback onProfileTap;
+  final VoidCallback onBranchesTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Drawer(
+      child: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            DrawerHeader(
+              margin: EdgeInsets.zero,
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+              decoration: BoxDecoration(
+                border: Border(
+                  bottom: BorderSide(
+                    color: Colors.white.withValues(alpha: 0.08),
+                  ),
+                ),
+              ),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.end,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(Icons.emoji_events, color: AppTheme.accentGold),
+                      const SizedBox(width: 8),
+                      const Text(
+                        '경마 Plus',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    '메뉴',
+                    style: TextStyle(fontSize: 12, color: Colors.grey.shade400),
+                  ),
+                ],
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.account_circle_outlined),
+              title: const Text('내 프로필'),
+              trailing: const Icon(Icons.chevron_right, size: 20),
+              onTap: onProfileTap,
+            ),
+            ListTile(
+              leading: Icon(
+                Icons.directions_rounded,
+                color: AppTheme.primaryGreen,
+              ),
+              title: const Text('경마장 가는길'),
+              subtitle: Text(
+                '현재 위치 기준 거리순',
+                style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
+              ),
+              trailing: const Icon(Icons.chevron_right, size: 20),
+              onTap: onBranchesTap,
+            ),
+            const Spacer(),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class _RaceListTab extends ConsumerStatefulWidget {

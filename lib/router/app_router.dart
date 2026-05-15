@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../features/branches/screens/branches_screen.dart';
 import '../features/home/screens/home_screen.dart';
 import '../features/profile/screens/profile_screen.dart';
 import '../features/purchase/screens/subscription_screen.dart';
@@ -61,6 +62,10 @@ final appRouter = GoRouter(
     GoRoute(
       path: '/profile',
       builder: (context, state) => const ProfileScreen(),
+    ),
+    GoRoute(
+      path: '/branches',
+      builder: (context, state) => const BranchesScreen(),
     ),
     GoRoute(
       path: '/subscription',

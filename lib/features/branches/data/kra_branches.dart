@@ -1,0 +1,183 @@
+import '../models/kra_branch.dart';
+
+/// 한국마사회(KRA) 공식 경마장 + 장외발매소(지사) + 경륜·경정 지점 정적 데이터.
+///
+/// 좌표·주소·전화번호는 사용자 제공 자료(한국마사회 및 공개 위치자료) 기준이며,
+/// 운영 현황(개·폐점, 이전)은 변경될 수 있으므로 주기적 확인이 필요하다.
+const List<KraBranch> kraBranches = [
+  // ── 전국 공식 경마장 (렛츠런파크) ──
+  KraBranch(
+    name: '렛츠런파크 서울',
+    address: '경기도 과천시 경마공원대로 107',
+    phone: '1566-3333',
+    category: KraBranchCategory.racepark,
+    latitude: 37.4436,
+    longitude: 127.0070,
+  ),
+  KraBranch(
+    name: '렛츠런파크 부산경남',
+    address: '부산광역시 강서구 가락대로 929',
+    phone: '1566-3333',
+    category: KraBranchCategory.racepark,
+    latitude: 35.1565,
+    longitude: 128.8808,
+  ),
+  KraBranch(
+    name: '제주경마공원',
+    address: '제주특별자치도 제주시 애월읍 평화로 2144',
+    phone: '1566-3333',
+    category: KraBranchCategory.racepark,
+    latitude: 33.4096,
+    longitude: 126.4094,
+  ),
+
+  // ── 서울권 장외발매소 ──
+  KraBranch(
+    name: '강동지사',
+    address: '서울특별시 강동구 천호동 415-10',
+    phone: '02-6411-5900',
+    category: KraBranchCategory.offTrack,
+    latitude: 37.5389,
+    longitude: 127.1255,
+  ),
+  KraBranch(
+    name: '강북지사',
+    address: '서울 강북구 도봉로 302',
+    phone: '02-6312-2027',
+    category: KraBranchCategory.offTrack,
+    latitude: 37.6364,
+    longitude: 127.0247,
+  ),
+  KraBranch(
+    name: '도봉지사',
+    address: '서울 도봉구 노해로67길 14',
+    phone: '02-6006-5718',
+    category: KraBranchCategory.offTrack,
+    latitude: 37.6548,
+    longitude: 127.0450,
+  ),
+  KraBranch(
+    name: '동대문지사',
+    address: '서울 동대문구 난계로 254',
+    phone: '02-6233-3613',
+    category: KraBranchCategory.offTrack,
+    latitude: 37.5712,
+    longitude: 127.0258,
+  ),
+  KraBranch(
+    name: '선릉지사',
+    address: '서울 강남구 테헤란로 416',
+    phone: '02-6006-5301',
+    category: KraBranchCategory.offTrack,
+    latitude: 37.5045,
+    longitude: 127.0489,
+  ),
+  KraBranch(
+    name: '영등포지사',
+    address: '서울 영등포구 영중로8길 14',
+    phone: '02-6006-5546',
+    category: KraBranchCategory.offTrack,
+    latitude: 37.5188,
+    longitude: 126.9076,
+  ),
+  KraBranch(
+    name: '중랑지사',
+    address: '서울 중랑구 망우로 390',
+    phone: '02-6006-5767',
+    category: KraBranchCategory.offTrack,
+    latitude: 37.5984,
+    longitude: 127.0927,
+  ),
+  KraBranch(
+    name: '청담지사',
+    address: '서울 강남구 도산대로 529',
+    phone: '02-6006-5277',
+    category: KraBranchCategory.offTrack,
+    latitude: 37.5256,
+    longitude: 127.0495,
+  ),
+
+  // ── 경기권 장외발매소 ──
+  KraBranch(
+    name: '광명지사',
+    address: '경기 광명시 디지털로 29',
+    phone: '02-2067-3244',
+    category: KraBranchCategory.offTrack,
+    latitude: 37.4783,
+    longitude: 126.8867,
+  ),
+  KraBranch(
+    name: '구리지사',
+    address: '경기 구리시 안골로 105',
+    phone: '031-510-5512',
+    category: KraBranchCategory.offTrack,
+    latitude: 37.6011,
+    longitude: 127.1395,
+  ),
+  KraBranch(
+    name: '분당지사',
+    address: '경기 성남시 분당구 황새울로311번길 37',
+    phone: '031-622-5974',
+    category: KraBranchCategory.offTrack,
+    latitude: 37.3857,
+    longitude: 127.1218,
+  ),
+  KraBranch(
+    name: '수원지사',
+    address: '경기 수원시 영통구 봉영로 1617',
+    phone: '031-300-2500',
+    category: KraBranchCategory.offTrack,
+    latitude: 37.2510,
+    longitude: 127.0712,
+  ),
+  KraBranch(
+    name: '시흥지사',
+    address: '경기 시흥시 마유로 415',
+    phone: '031-500-5623',
+    category: KraBranchCategory.offTrack,
+    latitude: 37.3812,
+    longitude: 126.8057,
+  ),
+  KraBranch(
+    name: '안산지사',
+    address: '경기 안산시 단원구 삼일로 310',
+    phone: '031-500-5727',
+    category: KraBranchCategory.offTrack,
+    latitude: 37.3217,
+    longitude: 126.8304,
+  ),
+  KraBranch(
+    name: '의정부지사',
+    address: '경기 의정부시 시민로 45',
+    phone: '031-822-6214',
+    category: KraBranchCategory.offTrack,
+    latitude: 37.7381,
+    longitude: 127.0428,
+  ),
+  KraBranch(
+    name: '일산지사',
+    address: '경기 고양시 일산동구 중앙로1275번길',
+    phone: '031-810-2614',
+    category: KraBranchCategory.offTrack,
+    latitude: 37.6586,
+    longitude: 126.7702,
+  ),
+
+  // ── 인천권 장외발매소 ──
+  KraBranch(
+    name: '인천미추홀지사',
+    address: '인천 미추홀구 인중로 9',
+    phone: '032-230-2222',
+    category: KraBranchCategory.offTrack,
+    latitude: 37.4662,
+    longitude: 126.6507,
+  ),
+  KraBranch(
+    name: '인천부평지사',
+    address: '인천 부평구 장제로 54',
+    phone: '032-270-3617',
+    category: KraBranchCategory.offTrack,
+    latitude: 37.4892,
+    longitude: 126.7249,
+  ),
+];
