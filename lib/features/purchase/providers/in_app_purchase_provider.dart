@@ -97,10 +97,20 @@ class _PurchaseVerificationResult {
 
 class InAppPurchaseNotifier extends StateNotifier<InAppPurchaseState> {
   InAppPurchaseNotifier({InAppPurchase? inAppPurchase})
-    : _inAppPurchase = inAppPurchase ?? InAppPurchase.instance,
+    : _injectedInAppPurchase = inAppPurchase,
       super(const InAppPurchaseState());
 
-  final InAppPurchase _inAppPurchase;
+  /// 외부에서 주입된 인스턴스(테스트용). 주입되지 않은 경우 [_inAppPurchase]가
+  /// 처음 사용될 때 [InAppPurchase.instance]로 lazy 초기화된다.
+  ///
+  /// 웹/데스크톱처럼 `in_app_purchase` 플랫폼 구현이 없는 환경에서는
+  /// `InAppPurchase.instance` 호출 자체가 동기적으로 throw 하므로
+  /// 절대 생성자 시점에 평가해서는 안 된다.
+  final InAppPurchase? _injectedInAppPurchase;
+  InAppPurchase? _cachedInAppPurchase;
+  InAppPurchase get _inAppPurchase =>
+      _injectedInAppPurchase ??
+      (_cachedInAppPurchase ??= InAppPurchase.instance);
   StreamSubscription<List<PurchaseDetails>>? _purchaseSubscription;
   Timer? _entitlementRefreshTimer;
 
@@ -789,6 +799,18 @@ class InAppPurchaseNotifier extends StateNotifier<InAppPurchaseState> {
 final inAppPurchaseProvider =
     StateNotifierProvider<InAppPurchaseNotifier, InAppPurchaseState>((ref) {
       final notifier = InAppPurchaseNotifier();
-      unawaited(notifier.initialize());
+      // in_app_purchase 플러그인은 웹/데스크톱을 지원하지 않으므로,
+      // 모바일(iOS/Android)에서만 실제 초기화를 수행한다.
+      // 그렇지 않으면 MissingPluginException 이 unhandledrejection 으로
+      // 빠져 웹에서 빈 화면/오류 화면을 유발할 수 있다.
+      if (!kIsWeb &&
+          (defaultTargetPlatform == TargetPlatform.iOS ||
+              defaultTargetPlatform == TargetPlatform.android)) {
+        unawaited(
+          notifier.initialize().catchError((Object e, StackTrace st) {
+            debugPrint('[IAP] initialize() error: $e\n$st');
+          }),
+        );
+      }
       return notifier;
     });

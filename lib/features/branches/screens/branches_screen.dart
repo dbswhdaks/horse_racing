@@ -278,6 +278,12 @@ class _StatusBanner extends StatelessWidget {
   }
 }
 
+/// 카테고리 필터 (전체 / 공식 경마장 / 장외발매소).
+///
+/// Material 3 [ChoiceChip] 은 iPhone Safari(CanvasKit) 환경에서 내부
+/// `WidgetStateTextStyle` 해석이 일관되지 않아 라벨이 어두운 색으로 렌더링되거나
+/// 잘려 보이는 문제가 있었다. 색/패딩을 우리가 직접 제어하는 커스텀 칩으로
+/// 교체해 모든 플랫폼에서 동일하게 보이도록 한다.
 class _CategoryFilterChips extends StatelessWidget {
   const _CategoryFilterChips({required this.selected, required this.onChanged});
 
@@ -287,7 +293,7 @@ class _CategoryFilterChips extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      height: 48,
+      height: 56,
       child: ListView(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -302,13 +308,40 @@ class _CategoryFilterChips extends StatelessWidget {
   }
 
   Widget _chip({required String label, required KraBranchCategory? value}) {
+    final isSelected = selected == value;
+    final bgColor = isSelected ? AppTheme.primaryGreen : Colors.transparent;
+    final borderColor = isSelected
+        ? AppTheme.primaryGreen
+        : Colors.white.withValues(alpha: 0.35);
+
+    // 수평 ListView 의 child 는 cross-axis(세로) 로 부모 높이만큼 늘어난다.
+    // Center 로 감싸면 칩이 본래 높이로 줄어들면서 ListView 세로 중앙에
+    // 놓이고, 칩 내부 Text 도 자연스럽게 위·아래 중앙에 정렬된다.
     return Padding(
       padding: const EdgeInsets.only(right: 8),
       child: Center(
-        child: ChoiceChip(
-          label: Text(label),
-          selected: selected == value,
-          onSelected: (_) => onChanged(value),
+        child: Material(
+          color: bgColor,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+            side: BorderSide(color: borderColor, width: 1),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: () => onChanged(value),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Text(
+                label,
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 13,
+                  fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                  height: 1.0,
+                ),
+              ),
+            ),
+          ),
         ),
       ),
     );

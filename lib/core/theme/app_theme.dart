@@ -25,6 +25,12 @@ class AppTheme {
         onPrimary: Colors.white,
         onSecondary: Colors.black,
         onSurface: Colors.white,
+        // Material 3 ChoiceChip / FilterChip 가 '선택' 상태일 때
+        // 라벨 색으로 onSecondaryContainer 를 사용한다. 기본값이
+        // 어두운 색이라 녹색 배경 위에서 검은 글씨로 보이므로 흰색으로
+        // 강제한다. (특히 iOS Safari CanvasKit 에서 가독성이 떨어짐)
+        secondaryContainer: primaryGreen,
+        onSecondaryContainer: Colors.white,
       ),
       scaffoldBackgroundColor: surfaceDark,
       textTheme: GoogleFonts.notoSansKrTextTheme(
@@ -66,7 +72,24 @@ class AppTheme {
       chipTheme: ChipThemeData(
         backgroundColor: cardDark,
         selectedColor: primaryGreen,
-        labelStyle: GoogleFonts.notoSansKr(fontSize: 12),
+        // 모든 WidgetState(특히 selected) 에서 라벨 색을 흰색으로 고정한다.
+        // 단순한 TextStyle 의 color 는 Material 3 ChoiceChip 의 내부
+        // WidgetStateColor 분기에 의해 덮어써질 수 있어 WidgetStateTextStyle
+        // 로 명시한다.
+        labelStyle: WidgetStateTextStyle.resolveWith(
+          (states) => GoogleFonts.notoSansKr(
+            fontSize: 12,
+            fontWeight: states.contains(WidgetState.selected)
+                ? FontWeight.w700
+                : FontWeight.w500,
+            color: Colors.white,
+          ),
+        ),
+        secondaryLabelStyle: GoogleFonts.notoSansKr(
+          fontSize: 12,
+          fontWeight: FontWeight.w700,
+          color: Colors.white,
+        ),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(20),
         ),

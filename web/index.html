@@ -18,12 +18,14 @@
 
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
+  <!-- viewport-fit=cover 로 iPhone 노치 영역까지 사용 (CSS env(safe-area-inset-*) 활성화) -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, viewport-fit=cover">
   <meta name="description" content="경마 예측 앱 - 한국마사회 공공데이터 기반">
 
   <!-- iOS meta tags & icons -->
   <meta name="mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="경마 Plus">
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
 
@@ -31,9 +33,150 @@
   <link rel="icon" type="image/png" href="favicon.png"/>
 
   <title>경마 Plus</title>
+  <!-- script.sh 의 웹 배포 단계에서 sed 로 실제 빌드 타임스탬프로 치환된다. -->
+  <meta name="x-build-tag" content="BUILD_TAG_PLACEHOLDER">
   <link rel="manifest" href="manifest.json">
+
+  <style>
+    /* 앱 다크 테마와 동일한 배경색으로 맞춰 iOS Safari 의 오버스크롤 바운스가
+       파란색으로 새지 않게 한다 (AppTheme.surfaceDark = #121212). */
+    html, body { margin: 0; padding: 0; height: 100%; background: #121212; color: #fff;
+                 font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+                 -webkit-text-size-adjust: 100%; }
+    #app-loader { position: fixed; inset: 0; display: flex; flex-direction: column;
+                  align-items: center; justify-content: center; gap: 16px;
+                  transition: opacity .25s ease-out; }
+    #app-loader.hide { opacity: 0; pointer-events: none; }
+    #app-loader .spinner { width: 44px; height: 44px; border-radius: 50%;
+                           border: 3px solid rgba(255,255,255,.2); border-top-color: #fff;
+                           animation: spin 1s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    #app-error { position: fixed; inset: 0;
+                 padding: calc(env(safe-area-inset-top, 0px) + 24px) 24px
+                         calc(env(safe-area-inset-bottom, 0px) + 24px) 24px;
+                 box-sizing: border-box;
+                 display: none; flex-direction: column; gap: 12px; overflow: auto;
+                 background: #121212; color: #fff; }
+    #app-error.show { display: flex; }
+    #app-error h2 { margin: 0; font-size: 18px; }
+    #app-error pre { background: rgba(0,0,0,.3); padding: 12px; border-radius: 6px;
+                     white-space: pre-wrap; word-break: break-word; font-size: 12px; }
+    #app-error button { align-self: flex-start; padding: 8px 16px; border: 0;
+                        border-radius: 6px; background: #fff; color: #0D2B3E; cursor: pointer; }
+  </style>
 </head>
 <body>
+  <!-- 로딩 인디케이터 -->
+  <div id="app-loader">
+    <div class="spinner"></div>
+    <div>경마 Plus 로딩 중...</div>
+    <!-- 빌드 ID 를 노출해 모바일에서 캐시 적용 여부를 즉시 확인할 수 있게 한다. -->
+    <div id="app-build-tag"
+         style="font-size:10px; color:rgba(255,255,255,0.5);">build BUILD_TAG_PLACEHOLDER</div>
+  </div>
+
+  <!-- 치명적 오류 표시 영역 -->
+  <div id="app-error">
+    <h2>앱을 불러오지 못했습니다</h2>
+    <pre id="app-error-msg"></pre>
+    <button onclick="location.reload()">새로고침</button>
+  </div>
+
+  <script>
+    // ─────────────────────────────────────────────────────────────
+    // (1) 옛 서비스워커 + 캐시 강제 해제
+    //     iOS Safari 는 한 번 캐시된 index.html / 서비스워커가 새 배포 후에도
+    //     계속 유지되는 일이 잦다. SW 해제 + Cache Storage 전체 삭제로 다음
+    //     로드부터 무조건 최신 빌드를 받게 한다.
+    // ─────────────────────────────────────────────────────────────
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistrations().then(function (regs) {
+        regs.forEach(function (r) { r.unregister(); });
+      }).catch(function () { /* ignore */ });
+    }
+    if (window.caches && caches.keys) {
+      caches.keys().then(function (keys) {
+        keys.forEach(function (k) { caches.delete(k); });
+      }).catch(function () { /* ignore */ });
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // (2) 에러 처리 전략
+    //     첫 프레임이 그려지면 앱은 정상 동작 중으로 간주한다.
+    //     첫 프레임 이전에 발생한 에러는 "즉시" 전체 에러 화면으로 띄우지
+    //     않는다 — iOS Safari 환경에서는 Firebase/Analytics/IndexedDB(시크릿
+    //     모드)/플러그인 등이 초기화 중 비치명적인 unhandledrejection 을
+    //     자주 던지지만, Flutter 는 그 와중에도 정상적으로 첫 프레임을
+    //     렌더링한다. 과거에는 단 한 번의 에러로도 로더가 사라지고
+    //     "앱을 불러오지 못했습니다" 화면이 떠 정상 화면을 가려버렸다.
+    //
+    //     새 전략:
+    //       - 에러는 콘솔과 내부 버퍼에만 기록한다 (UI 영향 없음).
+    //       - 첫 프레임이 그려지면 모두 무시한다.
+    //       - 첫 프레임이 일정 시간 안에 안 그려진 경우에만 에러 화면을
+    //         표시하고, 기록해둔 에러를 함께 보여 디버깅을 돕는다.
+    // ─────────────────────────────────────────────────────────────
+    var __appReady = false;
+    var __errorLog = [];
+
+    function recordError(msg) {
+      if (!msg) return;
+      try {
+        __errorLog.push(String(msg));
+        // 메모리 보호용: 너무 많이 쌓이지 않게 상한선만 유지
+        if (__errorLog.length > 20) __errorLog.shift();
+        if (window.console) console.warn('[pre-ready error]', msg);
+      } catch (_) { /* ignore */ }
+    }
+
+    function showFatalError(msg) {
+      if (__appReady) {
+        if (window.console) console.warn('[post-ready error ignored]', msg);
+        return;
+      }
+      var loader = document.getElementById('app-loader');
+      var errBox = document.getElementById('app-error');
+      var errMsg = document.getElementById('app-error-msg');
+      if (loader) loader.classList.add('hide');
+      if (errBox) errBox.classList.add('show');
+      if (errMsg) {
+        var body = (msg || '') + '\n\nUA: ' + (navigator.userAgent || '') +
+                   '\nURL: ' + location.href;
+        if (__errorLog.length) {
+          body += '\n\n--- pre-ready errors ---\n' + __errorLog.join('\n---\n');
+        }
+        errMsg.textContent = body;
+      }
+    }
+
+    window.addEventListener('error', function (e) {
+      recordError((e.error && e.error.stack) || e.message || String(e));
+    });
+    window.addEventListener('unhandledrejection', function (e) {
+      var r = e.reason;
+      recordError((r && (r.stack || r.message)) || String(r));
+    });
+
+    // ─────────────────────────────────────────────────────────────
+    // (3) Flutter 가 첫 프레임을 그리면 로더 숨김 + 이후 에러 무시
+    // ─────────────────────────────────────────────────────────────
+    window.addEventListener('flutter-first-frame', function () {
+      __appReady = true;
+      __errorLog = [];
+      var loader = document.getElementById('app-loader');
+      if (loader) loader.classList.add('hide');
+    });
+
+    // ─────────────────────────────────────────────────────────────
+    // (4) 60초가 지나도 첫 프레임이 안 뜨면 안내 표시
+    //     (모바일 셀룰러 환경에서 CanvasKit wasm 다운로드가 길어질 수 있음)
+    // ─────────────────────────────────────────────────────────────
+    setTimeout(function () {
+      if (__appReady) return;
+      showFatalError('앱 로드가 너무 오래 걸립니다. 네트워크 상태를 확인하거나 새로고침해 주세요.');
+    }, 60000);
+  </script>
+
   <script src="flutter_bootstrap.js" async></script>
 </body>
 </html>

@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "535701386896",
+    "project_id": "horse-racing-bb0ef",
+    "storage_bucket": "horse-racing-bb0ef.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:535701386896:android:9ac50f604bf33db695ca15",
+        "android_client_info": {
+          "package_name": "com.horseracingplus.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDYI2XUL9-kUkKOjJ74hHrHIOd77AMy1oc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
