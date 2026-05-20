@@ -19,7 +19,6 @@ class SubscriptionScreen extends ConsumerStatefulWidget {
 
 class _SubscriptionScreenState extends ConsumerState<SubscriptionScreen> {
   late String _selectedProductId;
-  String _selectedPaymentMethod = '신용/체크카드';
 
   @override
   void initState() {
@@ -37,46 +36,6 @@ class _SubscriptionScreenState extends ConsumerState<SubscriptionScreen> {
         context,
       ).showSnackBar(const SnackBar(content: Text('결제수단 관리 페이지를 열 수 없습니다.')));
     }
-  }
-
-  Future<String?> _showPaymentMethodPicker(BuildContext context) {
-    const options = ['신용/체크카드', '휴대폰 결제', '계좌이체'];
-    return showModalBottomSheet<String>(
-      context: context,
-      showDragHandle: true,
-      builder: (context) {
-        return SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Padding(
-                padding: EdgeInsets.fromLTRB(20, 4, 20, 8),
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    '결제수단 선택',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
-                  ),
-                ),
-              ),
-              ...options.map(
-                (option) => ListTile(
-                  title: Text(option),
-                  trailing: option == _selectedPaymentMethod
-                      ? const Icon(
-                          Icons.check_circle,
-                          color: Colors.greenAccent,
-                        )
-                      : null,
-                  onTap: () => Navigator.of(context).pop(option),
-                ),
-              ),
-              const SizedBox(height: 6),
-            ],
-          ),
-        );
-      },
-    );
   }
 
   @override
@@ -133,7 +92,7 @@ class _SubscriptionScreenState extends ConsumerState<SubscriptionScreen> {
                       Icon(Icons.payments_outlined, size: 18),
                       SizedBox(width: 8),
                       Text(
-                        '지원 결제수단 (구글플레이)',
+                        '결제수단',
                         style: TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.w700,
@@ -142,25 +101,48 @@ class _SubscriptionScreenState extends ConsumerState<SubscriptionScreen> {
                     ],
                   ),
                   const SizedBox(height: 10),
-                  const Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
+                  Row(
                     children: [
-                      _PaymentMethodChip(label: '신용/체크카드'),
-                      _PaymentMethodChip(label: '휴대폰 결제'),
-                      _PaymentMethodChip(label: '계좌이체'),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 6,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.08),
+                          borderRadius: BorderRadius.circular(999),
+                          border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.14),
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.shop_rounded, size: 14),
+                            const SizedBox(width: 6),
+                            Text(
+                              'Google Play 인앱 결제',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                                color: Colors.grey.shade100,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
                     ],
                   ),
                   const SizedBox(height: 10),
                   Text(
-                    '실제 결제수단 노출은 계정/국가/스토어 설정에 따라 달라질 수 있습니다.',
+                    '결제는 Google Play에서만 진행됩니다. 실제 사용 가능한 결제수단(카드/휴대폰/계좌 등)은 Google Play 계정 설정에 따라 노출됩니다.',
                     style: TextStyle(fontSize: 12, color: Colors.grey.shade400),
                   ),
                   const SizedBox(height: 8),
                   TextButton.icon(
                     onPressed: () => _openPlayPaymentMethods(context),
                     icon: const Icon(Icons.open_in_new_rounded, size: 14),
-                    label: const Text('결제수단 관리'),
+                    label: const Text('Google Play 결제수단 관리'),
                   ),
                 ],
               ),
@@ -196,15 +178,6 @@ class _SubscriptionScreenState extends ConsumerState<SubscriptionScreen> {
               onPressed: isPending
                   ? null
                   : () async {
-                      if (isMonthly) {
-                        final selectedMethod = await _showPaymentMethodPicker(
-                          context,
-                        );
-                        if (selectedMethod == null) return;
-                        if (!mounted) return;
-                        setState(() => _selectedPaymentMethod = selectedMethod);
-                      }
-
                       final ok = await notifier.startSubscriptionPurchase(
                         preferredProductId: _selectedProductId,
                       );
@@ -215,18 +188,6 @@ class _SubscriptionScreenState extends ConsumerState<SubscriptionScreen> {
                           SnackBar(
                             content: Text(
                               latestState.errorMessage ?? '결제를 시작하지 못했습니다.',
-                            ),
-                          ),
-                        );
-                        return;
-                      }
-
-                      if (isMonthly && context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text(
-                              '선택한 결제수단: $_selectedPaymentMethod\n'
-                              '실제 결제는 구글플레이에서 진행됩니다.',
                             ),
                           ),
                         );
@@ -256,40 +217,7 @@ class _SubscriptionScreenState extends ConsumerState<SubscriptionScreen> {
                 style: TextStyle(fontSize: 12, color: Colors.red.shade200),
               ),
             ],
-            if (hasSubscription || iapState.errorMessage != null)
-              const SizedBox(height: 8),
-            Text(
-              '현재 선택 결제수단: $_selectedPaymentMethod',
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 12, color: Colors.grey.shade400),
-            ),
           ],
-        ),
-      ),
-    );
-  }
-}
-
-class _PaymentMethodChip extends StatelessWidget {
-  const _PaymentMethodChip({required this.label});
-
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          fontSize: 12,
-          fontWeight: FontWeight.w600,
-          color: Colors.grey.shade200,
         ),
       ),
     );
