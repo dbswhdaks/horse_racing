@@ -2580,8 +2580,17 @@ class _PremiumSubscriptionPaywallState
             width: 220,
             child: FilledButton.icon(
               onPressed: () async {
-                // 웹은 Google Play Billing이 불가하므로 곧바로 Play Store로 이동.
+                // 웹은 Google Play Billing이 불가하므로 플랫폼별로 분기 처리.
+                // - iOS 웹: Android 앱을 설치할 수 없으므로 안내 화면(/subscription)으로 이동
+                // - 그 외 웹(Android/Desktop): 곧바로 Play Store 앱 페이지로 이동
                 if (kIsWeb) {
+                  final isIosWeb =
+                      defaultTargetPlatform == TargetPlatform.iOS;
+                  if (isIosWeb) {
+                    if (!context.mounted) return;
+                    context.push('/subscription?plan=$_selectedProductId');
+                    return;
+                  }
                   final uri = Uri.parse(
                     'https://play.google.com/store/apps/details?id=com.horseracingplus.app',
                   );
