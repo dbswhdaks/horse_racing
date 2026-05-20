@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/constants/api_constants.dart';
 import '../../../core/constants/iap_constants.dart';
@@ -2578,8 +2579,18 @@ class _PremiumSubscriptionPaywallState
           SizedBox(
             width: 220,
             child: FilledButton.icon(
-              onPressed: () =>
-                  context.push('/subscription?plan=$_selectedProductId'),
+              onPressed: () async {
+                // 웹은 Google Play Billing이 불가하므로 곧바로 Play Store로 이동.
+                if (kIsWeb) {
+                  final uri = Uri.parse(
+                    'https://play.google.com/store/apps/details?id=com.horseracingplus.app',
+                  );
+                  await launchUrl(uri, webOnlyWindowName: '_self');
+                  return;
+                }
+                if (!context.mounted) return;
+                context.push('/subscription?plan=$_selectedProductId');
+              },
               icon: const Icon(Icons.verified_rounded, size: 18),
               label: const Text(
                 '구독하기',
