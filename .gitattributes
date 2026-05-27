@@ -1,0 +1,4 @@
+# Web crawlers (네이버 Yeti / 구글봇) 의 robots.txt 파서가
+# CRLF 줄바꿈에서 종종 실패한다. checkout 시에도 LF 로 강제한다.
+web/robots.txt   text eol=lf
+web/sitemap.xml  text eol=lf
