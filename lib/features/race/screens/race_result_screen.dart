@@ -1,10 +1,10 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/constants/api_constants.dart';
-import '../../../core/constants/iap_constants.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/in_app_webview_screen.dart';
 import '../../../core/widgets/shimmer_loading.dart';
@@ -14,6 +14,13 @@ import '../../../models/race_result.dart';
 import '../../../models/prediction.dart';
 import '../../purchase/providers/in_app_purchase_provider.dart';
 import '../providers/race_providers.dart';
+
+/// 개발자 본인이 페이월 없이 결과 화면의 예측비교/통과순위를 보기 위한 우회 플래그.
+/// - 디버그 빌드(kDebugMode)는 자동으로 통과한다.
+/// - 릴리스 빌드에서 통과하려면 빌드 시
+///   `--dart-define=DEV_BYPASS_PAYWALL=true` 옵션을 함께 지정한다.
+const bool _kDevBypassPaywall =
+    bool.fromEnvironment('DEV_BYPASS_PAYWALL', defaultValue: false);
 
 class RaceResultScreen extends ConsumerWidget {
   final String meet;
@@ -41,12 +48,15 @@ class RaceResultScreen extends ConsumerWidget {
     final oddsAsync = ref.watch(
       oddsProvider((meet: meet, date: date, raceNo: raceNo)),
     );
-    final purchasedProductIds = ref.watch(
-      inAppPurchaseProvider.select((state) => state.purchasedProductIds),
+    final hasSubscription = ref.watch(
+      inAppPurchaseProvider.select((state) => state.hasActiveSubscription),
     );
-    final canViewPredictionRemark = purchasedProductIds.any(
-      IapConstants.subscriptionProductIds.contains,
+    final isRestoringPurchases = ref.watch(
+      inAppPurchaseProvider.select((state) => state.isRestoring),
     );
+    // 출마표 화면과 동일하게 디버그 빌드/DEV_BYPASS_PAYWALL 우회 옵션을 적용한다.
+    final canViewPredictionRemark =
+        hasSubscription || kDebugMode || _kDevBypassPaywall;
     final canViewPredictionComparison = canViewPredictionRemark;
     final meetName = ApiConstants.meetNames[meet] ?? meet;
 
@@ -178,6 +188,8 @@ class RaceResultScreen extends ConsumerWidget {
                                   : 1400,
                               raceKey: '${meet}_${date}_$raceNo',
                             )
+                          : isRestoringPurchases
+                          ? const _AiComparisonRestoringCard()
                           : _AiComparisonLockedCard(
                               meet: meet,
                               date: date,
@@ -473,6 +485,58 @@ class _PodiumCard extends StatelessWidget {
 // ═══════════════════════════════════════════════════
 // AI 예측 비교 섹션
 // ═══════════════════════════════════════════════════
+
+/// 구독 복원(`restorePurchases`) 중 일시적으로 보여지는 카드.
+/// `purchasedProductIds` 가 빈 상태로 리셋되는 짧은 타이밍에 잠금 카드가
+/// 잘못 보이는 것을 방지한다.
+class _AiComparisonRestoringCard extends StatelessWidget {
+  const _AiComparisonRestoringCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            Colors.deepPurple.shade900.withValues(alpha: 0.35),
+            AppTheme.cardDark,
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.deepPurple.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 18,
+            height: 18,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              valueColor: AlwaysStoppedAnimation<Color>(
+                Colors.purpleAccent.shade100,
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              '구독 정보를 확인하고 있어요...',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                color: Colors.grey.shade200,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
 
 class _AiComparisonLockedCard extends StatelessWidget {
   const _AiComparisonLockedCard({

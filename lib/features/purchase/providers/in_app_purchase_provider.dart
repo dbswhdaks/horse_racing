@@ -45,6 +45,26 @@ class InAppPurchaseState {
   final bool isRestoring;
   final String? errorMessage;
 
+  /// 구독이 현재 활성 상태인지 견고하게 판정한다.
+  ///
+  /// - `purchasedProductIds` 에 구독 상품이 있으면 활성으로 간주한다.
+  /// - 일시적으로 `purchasedProductIds` 가 비어 있더라도
+  ///   `entitlementByProductId` 에 만료일이 미래인 항목이 있으면 활성으로 본다.
+  ///   (예: `restorePurchases(clearExisting: true)` 직후 짧은 시간 동안
+  ///    `purchasedProductIds` 가 빈 상태가 되는 타이밍을 방어한다.)
+  bool get hasActiveSubscription {
+    final hasPurchasedId = purchasedProductIds.any(
+      IapConstants.subscriptionProductIds.contains,
+    );
+    if (hasPurchasedId) return true;
+
+    final nowUtc = DateTime.now().toUtc();
+    return entitlementByProductId.values.any((e) {
+      return IapConstants.subscriptionProductIds.contains(e.productId) &&
+          e.expiresAtUtc.isAfter(nowUtc);
+    });
+  }
+
   InAppPurchaseState copyWith({
     bool? isAvailable,
     bool? isLoading,
@@ -400,10 +420,29 @@ class InAppPurchaseNotifier extends StateNotifier<InAppPurchaseState> {
     final functionName = IapConstants.serverVerifyFunctionName.trim();
     if (functionName.isEmpty) {
       _log('server verify function not configured, fallback to local check');
-      final expiresAtUtc = _calculateLocalSubscriptionExpiresAtUtc(
+      final isRestored = purchase.status == PurchaseStatus.restored;
+      var expiresAtUtc = _calculateLocalSubscriptionExpiresAtUtc(
         productId: purchase.productID,
         transactionDate: purchase.transactionDate,
       );
+      final nowUtc = DateTime.now().toUtc();
+
+      // restored 는 Google Play 가 "현재 시점 활성 구독" 으로 이미 검증한 거래다.
+      // 일부 디바이스/플랫폼에서 transactionDate 가 최초 구매일을 반환해
+      // 자동 갱신 후에도 즉시 만료로 계산되는 문제를 방어한다.
+      //
+      // 1) 만료일을 계산하지 못한 경우: 보수적으로 35일 활성 처리
+      // 2) 계산된 만료일이 과거인 경우: 보수적으로 35일 활성 처리
+      if (isRestored) {
+        if (expiresAtUtc == null || !expiresAtUtc.isAfter(nowUtc)) {
+          final fallbackExpiresAtUtc = nowUtc.add(const Duration(days: 35));
+          _log(
+            'restored purchase: extend expiry conservatively to $fallbackExpiresAtUtc',
+          );
+          expiresAtUtc = fallbackExpiresAtUtc;
+        }
+      }
+
       if (expiresAtUtc == null) {
         return _PurchaseVerificationResult(
           isValid: false,
@@ -411,7 +450,7 @@ class InAppPurchaseNotifier extends StateNotifier<InAppPurchaseState> {
           message: '구독 만료일 계산에 실패했습니다. 상품 정보를 확인해 주세요.',
         );
       }
-      final isActive = expiresAtUtc.isAfter(DateTime.now().toUtc());
+      final isActive = expiresAtUtc.isAfter(nowUtc);
       return _PurchaseVerificationResult(
         isValid: true,
         isActive: isActive,
