@@ -94,6 +94,13 @@ class LocalPredictor {
       marketWeight = 0.9;
     }
 
+    // 기초 지표·시장 신호가 모두 없는 상황(예: 신마 데뷔전 + 배당 미발표)에서는
+    // 모든 말의 점수가 동일해져 softmax 가 정확히 1/N 을 출력한다. 이 경우
+    // _winProbabilityLift 를 곱해 부풀리면 사용자 입장에서 "모두 15%" 같이
+    // 오해를 부르므로 lift 를 해제하고 정직하게 1/N 으로 표시한다.
+    final isUniformDistribution =
+        fundamentalSignalAbsent && marketByHorse.length < 2;
+
     for (final entry in entries) {
       final style = styles[entry.horseNo] ?? '중단';
       // 튜닝 스크립트와 같은 0~1 항목 점수를 만든 뒤 Top3 지표에 맞춘 가중합을 적용합니다.
@@ -198,7 +205,8 @@ class LocalPredictor {
       final entry = entries[i];
       final style = styles[entry.horseNo] ?? '중단';
       final winProb = probabilities[i];
-      final adjustedWinProb = (winProb * _winProbabilityLift)
+      final liftFactor = isUniformDistribution ? 1.0 : _winProbabilityLift;
+      final adjustedWinProb = (winProb * liftFactor)
           .clamp(0.0, 95.0)
           .toDouble();
       final rank = rankedHorseNos.indexOf(entry.horseNo) + 1;
@@ -250,6 +258,7 @@ class LocalPredictor {
       predictions: predictions,
       modelVersion: modelVersion,
       generatedAt: DateTime.now(),
+      isUniformDistribution: isUniformDistribution,
     );
   }
 

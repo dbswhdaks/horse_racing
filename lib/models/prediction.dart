@@ -63,6 +63,11 @@ class PredictionReport {
   final String modelVersion;
   final DateTime generatedAt;
 
+  /// 모든 출주마 기초 지표(rating/전적/상금)와 시장(배당) 신호가 모두 부재해
+  /// 차별화가 불가능한 경우(예: 신마·데뷔전 경주, 배당 미발표) 균등 분포가
+  /// 출력된다. 이 경우 UI에서 별도 안내 배지를 노출하기 위해 사용한다.
+  final bool isUniformDistribution;
+
   PredictionReport({
     required this.raceId,
     required this.raceDate,
@@ -71,6 +76,7 @@ class PredictionReport {
     required this.predictions,
     required this.modelVersion,
     required this.generatedAt,
+    this.isUniformDistribution = false,
   });
 
   factory PredictionReport.fromJson(Map<String, dynamic> json) {
@@ -87,6 +93,7 @@ class PredictionReport {
       modelVersion: json['model_version'] as String? ?? '',
       generatedAt:
           DateTime.tryParse(json['generated_at'] ?? '') ?? DateTime.now(),
+      isUniformDistribution: json['is_uniform_distribution'] as bool? ?? false,
     );
   }
 }

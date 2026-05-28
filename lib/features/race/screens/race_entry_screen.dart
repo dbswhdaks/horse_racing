@@ -88,30 +88,63 @@ class RaceEntryScreen extends ConsumerWidget {
           title: Text('$meetName ${raceNo}R'),
           centerTitle: false,
           actions: [
-            if (_isRaceFinished(race))
-              Padding(
-                padding: const EdgeInsets.only(right: 8),
-                child: TextButton.icon(
-                  onPressed: () => context.push('/result/$meet/$date/$raceNo'),
-                  icon: Icon(
-                    Icons.emoji_events_rounded,
-                    size: 18,
-                    color: AppTheme.winColor,
-                  ),
-                  label: Text(
-                    '결과',
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      color: AppTheme.winColor,
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: _isRaceFinished(race)
+                  ? TextButton.icon(
+                      onPressed: () =>
+                          context.push('/result/$meet/$date/$raceNo'),
+                      icon: Icon(
+                        Icons.emoji_events_rounded,
+                        size: 18,
+                        color: AppTheme.winColor,
+                      ),
+                      label: Text(
+                        '결과',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: AppTheme.winColor,
+                        ),
+                      ),
+                      style: TextButton.styleFrom(
+                        foregroundColor: AppTheme.winColor,
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                      ),
+                    )
+                  : Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.06),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: Colors.white.withValues(alpha: 0.18),
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.schedule_rounded,
+                            size: 16,
+                            color: Colors.grey.shade300,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            '진행전',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.grey.shade300,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                  style: TextButton.styleFrom(
-                    foregroundColor: AppTheme.winColor,
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                  ),
-                ),
-              ),
+            ),
           ],
           bottom: PreferredSize(
             preferredSize: const Size.fromHeight(46),
@@ -374,6 +407,53 @@ class RaceEntryScreen extends ConsumerWidget {
                 );
               }(),
             ),
+
+            // 신마·데뷔전 안내: 출마표 위에서 한 번 더 노출해 사용자가 카드
+            // 별 동률 정보(승률·예측 등)를 보고 오해하지 않도록 한다.
+            if (predAsync.valueOrNull?.isUniformDistribution ?? false)
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(14, 12, 14, 0),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 10,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF221C3A),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: const Color(0xFF9A7CFF).withValues(alpha: 0.45),
+                      ),
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Icon(
+                          Icons.info_outline_rounded,
+                          color: Color(0xFF9A7CFF),
+                          size: 18,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            '신마·데뷔전 경주\n'
+                            '출주마 전적·배당 정보가 아직 없어 균등 확률'
+                            '(1/${sorted.length}, 약 ${(100 / sorted.length).toStringAsFixed(1)}%)'
+                            '로 표시됩니다.',
+                            style: const TextStyle(
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w600,
+                              color: Color(0xFFCFC2FF),
+                              height: 1.45,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
 
             // 출마표 헤더
             SliverToBoxAdapter(
@@ -640,7 +720,53 @@ class RaceEntryScreen extends ConsumerWidget {
               ),
             ),
 
-            const SizedBox(height: 16),
+            const SizedBox(height: 12),
+
+            // 출주마 전적·배당 등 차별 신호가 전혀 없는 신마(데뷔전) 경주는
+            // softmax 결과가 정확히 1/N 로 균등 분포된다. 사용자가 "모든 말이
+            // 동일 확률"인 화면을 보고 오해하지 않도록 안내 배지를 노출한다.
+            if (report.isUniformDistribution) ...[
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF221C3A),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: const Color(0xFF9A7CFF).withValues(alpha: 0.45),
+                  ),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Icon(
+                      Icons.info_outline_rounded,
+                      color: Color(0xFF9A7CFF),
+                      size: 18,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        '신마·데뷔전 경주\n'
+                        '출주마 전적·배당 정보가 아직 없어 균등 확률'
+                        '(1/${sorted.length}, 약 ${(100 / sorted.length).toStringAsFixed(1)}%)'
+                        '로 표시됩니다.',
+                        style: const TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFFCFC2FF),
+                          height: 1.45,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+            ] else
+              const SizedBox(height: 4),
 
             // 승률(1착) 위주 — 리스트는 이미 compareByWinThenPlace
             Row(
@@ -1106,22 +1232,33 @@ class RaceEntryScreen extends ConsumerWidget {
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
 
+    // 1) 경주일(date)로부터 raceDay 를 만든다. 8자리(YYYYMMDD) 가 아니면 null.
+    DateTime? raceDay;
     if (date.length >= 8) {
       final y = int.tryParse(date.substring(0, 4));
       final mo = int.tryParse(date.substring(4, 6));
       final d = int.tryParse(date.substring(6, 8));
       if (y != null && mo != null && d != null) {
-        final raceDay = DateTime(y, mo, d);
-        if (raceDay.isBefore(today)) return true;
+        raceDay = DateTime(y, mo, d);
       }
     }
 
+    // 2) 경주일이 오늘보다 과거면 종료된 경주다.
+    if (raceDay != null && raceDay.isBefore(today)) return true;
+
+    // 3) 경주일이 오늘보다 미래면 startTime 과 무관하게 진행 전이다.
+    //    (기존 로직은 미래 경주의 "14:00" 을 오늘 14:00 으로 계산해 잘못
+    //     종료 판정하던 버그가 있었다.)
+    if (raceDay != null && raceDay.isAfter(today)) return false;
+
+    // 4) 경주일이 오늘이면 출발 시각 + 30분 경과 여부로 판정한다.
     if (race == null || race.startTime.isEmpty) return false;
     try {
       final t = race.startTime.replaceAll(':', '').trim();
       final h = int.parse(t.substring(0, t.length - 2));
       final m = int.parse(t.substring(t.length - 2));
-      final raceTime = DateTime(now.year, now.month, now.day, h, m);
+      final baseDay = raceDay ?? today;
+      final raceTime = DateTime(baseDay.year, baseDay.month, baseDay.day, h, m);
       return now.difference(raceTime).inMinutes >= 30;
     } catch (_) {
       return false;
