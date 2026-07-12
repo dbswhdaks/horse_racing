@@ -21,187 +21,254 @@ class RaceCard extends StatelessWidget {
     final status = _raceStatus();
     final timeStr = _formatTime(race.startTime);
     final countdown = _countdown();
+    final isLive = status == _RaceStatus.live;
 
-    return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(14),
-        child: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _RaceNumberBadge(raceNo: race.raceNo),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
+    final borderColor = isLive
+        ? AppTheme.negativeRed.withValues(alpha: 0.35)
+        : Colors.white.withValues(alpha: 0.06);
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(16),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          splashColor: AppTheme.accentGold.withValues(alpha: 0.08),
+          highlightColor: AppTheme.accentGold.withValues(alpha: 0.04),
+          child: Ink(
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [Color(0xFF1F1F1F), Color(0xFF151515)],
+              ),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: borderColor, width: 1),
+              boxShadow: [
+                BoxShadow(
+                  color: isLive
+                      ? AppTheme.negativeRed.withValues(alpha: 0.18)
+                      : Colors.black.withValues(alpha: 0.35),
+                  blurRadius: isLive ? 20 : 10,
+                  spreadRadius: isLive ? -3 : -1,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(14, 13, 14, 11),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _RaceNumberBadge(raceNo: race.raceNo),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Flexible(
-                              child: Text(
-                                race.raceName.isNotEmpty
-                                    ? race.raceName
-                                    : '${race.raceNo}경주',
-                                style: const TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w700,
+                            Row(
+                              children: [
+                                Flexible(
+                                  child: Text(
+                                    race.raceName.isNotEmpty
+                                        ? race.raceName
+                                        : '${race.raceNo}경주',
+                                    style: const TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w800,
+                                      letterSpacing: -0.3,
+                                      color: Colors.white,
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
                                 ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
+                                const SizedBox(width: 8),
+                                _StatusBadge(status: status),
+                              ],
                             ),
-                            const SizedBox(width: 8),
-                            _StatusBadge(status: status),
+                            const SizedBox(height: 4),
+                            Text(
+                              '${race.meetName}  ·  ${race.gradeLabel}  ·  ${race.distanceLabel}',
+                              style: TextStyle(
+                                fontSize: 12.5,
+                                color: Colors.grey.shade400,
+                                fontWeight: FontWeight.w500,
+                                letterSpacing: -0.1,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
                           ],
                         ),
-                        const SizedBox(height: 4),
-                        Text(
-                          '${race.meetName}  •  ${race.gradeLabel}  •  ${race.distanceLabel}',
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: Colors.grey.shade400,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ],
+                      ),
+                      const SizedBox(width: 8),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          if (timeStr.isNotEmpty)
+                            Text(
+                              timeStr,
+                              style: TextStyle(
+                                fontSize: 22,
+                                fontWeight: FontWeight.w900,
+                                color: AppTheme.accentGold,
+                                letterSpacing: -0.5,
+                                shadows: [
+                                  Shadow(
+                                    color: AppTheme.accentGold
+                                        .withValues(alpha: 0.4),
+                                    blurRadius: 12,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          if (countdown.isNotEmpty)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 2),
+                              child: Text(
+                                countdown,
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700,
+                                  color: isLive
+                                      ? AppTheme.negativeRed
+                                      : AppTheme.positiveGreen,
+                                  letterSpacing: -0.2,
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.fromLTRB(14, 9, 14, 11),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.025),
+                    border: Border(
+                      top: BorderSide(
+                        color: Colors.white.withValues(alpha: 0.05),
+                      ),
                     ),
                   ),
-                  const SizedBox(width: 8),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.end,
+                  child: Row(
                     children: [
-                      if (timeStr.isNotEmpty)
-                        Text(
-                          timeStr,
-                          style: TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.w800,
-                            color: AppTheme.accentGold,
+                      Expanded(
+                        child: Wrap(
+                          spacing: 4,
+                          runSpacing: 4,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: [
+                            if ((headCount ?? race.headCount) > 0)
+                              _MiniStat(
+                                icon: Icons.groups_rounded,
+                                value: '${headCount ?? race.headCount}두',
+                              ),
+                            _MiniStat(
+                              icon: Icons.straighten_rounded,
+                              value: race.distanceLabel,
+                            ),
+                            if (race.ageCondition.isNotEmpty)
+                              _MiniStat(
+                                icon: Icons.cake_rounded,
+                                value: race.ageCondition,
+                              ),
+                            if (race.sexCondition.isNotEmpty)
+                              _MiniStat(
+                                icon: Icons.wc_rounded,
+                                value: race.sexCondition,
+                              ),
+                          ],
+                        ),
+                      ),
+                      if (onResultTap != null &&
+                          status == _RaceStatus.finished)
+                        GestureDetector(
+                          onTap: onResultTap,
+                          child: Container(
+                            margin: const EdgeInsets.only(left: 6),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 9, vertical: 4),
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                colors: [
+                                  AppTheme.winColor.withValues(alpha: 0.20),
+                                  AppTheme.winColor.withValues(alpha: 0.08),
+                                ],
+                              ),
+                              borderRadius: BorderRadius.circular(7),
+                              border: Border.all(
+                                color:
+                                    AppTheme.winColor.withValues(alpha: 0.35),
+                              ),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.emoji_events_rounded,
+                                    size: 13, color: AppTheme.winColor),
+                                const SizedBox(width: 3),
+                                Text(
+                                  '결과',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w800,
+                                    color: AppTheme.winColor,
+                                    letterSpacing: -0.2,
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
                         ),
-                      if (countdown.isNotEmpty)
-                        Text(
-                          countdown,
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                            color: status == _RaceStatus.live
-                                ? AppTheme.negativeRed
-                                : AppTheme.positiveGreen,
+                      if (race.prize1 > 0)
+                        Container(
+                          margin: const EdgeInsets.only(left: 6),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 9, vertical: 4),
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              colors: [
+                                AppTheme.accentGold.withValues(alpha: 0.22),
+                                AppTheme.accentGold.withValues(alpha: 0.08),
+                              ],
+                            ),
+                            borderRadius: BorderRadius.circular(7),
+                            border: Border.all(
+                              color: AppTheme.accentGold
+                                  .withValues(alpha: 0.35),
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.monetization_on_rounded,
+                                  size: 13, color: AppTheme.accentGold),
+                              const SizedBox(width: 3),
+                              Text(
+                                _formatPrize(race.prize1),
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w800,
+                                  color: AppTheme.accentGold,
+                                  letterSpacing: -0.2,
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                     ],
                   ),
-                ],
-              ),
-            ),
-
-            Container(
-              padding: const EdgeInsets.fromLTRB(14, 8, 14, 10),
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.03),
-                borderRadius: const BorderRadius.only(
-                  bottomLeft: Radius.circular(14),
-                  bottomRight: Radius.circular(14),
                 ),
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Wrap(
-                      spacing: 4,
-                      runSpacing: 4,
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      children: [
-                        if ((headCount ?? race.headCount) > 0)
-                          _MiniStat(
-                            icon: Icons.groups_rounded,
-                            value: '${headCount ?? race.headCount}두',
-                          ),
-                        _MiniStat(
-                          icon: Icons.straighten_rounded,
-                          value: race.distanceLabel,
-                        ),
-                        if (race.ageCondition.isNotEmpty)
-                          _MiniStat(
-                            icon: Icons.cake_rounded,
-                            value: race.ageCondition,
-                          ),
-                        if (race.sexCondition.isNotEmpty)
-                          _MiniStat(
-                            icon: Icons.wc_rounded,
-                            value: race.sexCondition,
-                          ),
-                      ],
-                    ),
-                  ),
-                  if (onResultTap != null &&
-                      status == _RaceStatus.finished)
-                    GestureDetector(
-                      onTap: onResultTap,
-                      child: Container(
-                        margin: const EdgeInsets.only(left: 6),
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 3),
-                        decoration: BoxDecoration(
-                          color: AppTheme.winColor.withValues(alpha: 0.12),
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(Icons.emoji_events_rounded,
-                                size: 13, color: AppTheme.winColor),
-                            const SizedBox(width: 3),
-                            Text(
-                              '결과',
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w700,
-                                color: AppTheme.winColor,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  if (race.prize1 > 0)
-                    Container(
-                      margin: const EdgeInsets.only(left: 6),
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 3),
-                      decoration: BoxDecoration(
-                        color: AppTheme.accentGold.withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.monetization_on_rounded,
-                              size: 13, color: AppTheme.accentGold),
-                          const SizedBox(width: 3),
-                          Text(
-                            _formatPrize(race.prize1),
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w700,
-                              color: AppTheme.accentGold,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                ],
-              ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );
@@ -288,36 +355,26 @@ class _StatusBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final (label, bg, fg) = switch (status) {
-      _RaceStatus.upcoming => (
-        '진행전',
-        Colors.orange.shade900.withValues(alpha: 0.5),
-        Colors.orange.shade300,
-      ),
-      _RaceStatus.live => (
-        '진행중',
-        AppTheme.negativeRed.withValues(alpha: 0.3),
-        AppTheme.negativeRed,
-      ),
-      _RaceStatus.finished => (
-        '종료',
-        Colors.grey.shade800,
-        Colors.grey.shade400,
-      ),
+    final (label, color) = switch (status) {
+      _RaceStatus.upcoming => ('진행전', Colors.orange.shade400),
+      _RaceStatus.live => ('진행중', AppTheme.negativeRed),
+      _RaceStatus.finished => ('종료', Colors.grey.shade500),
     };
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
       decoration: BoxDecoration(
-        color: bg,
-        borderRadius: BorderRadius.circular(5),
+        color: color.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: color.withValues(alpha: 0.4), width: 0.8),
       ),
       child: Text(
         label,
         style: TextStyle(
           fontSize: 10,
-          fontWeight: FontWeight.w700,
-          color: fg,
+          fontWeight: FontWeight.w800,
+          color: color,
+          letterSpacing: 0.2,
         ),
       ),
     );
@@ -332,23 +389,30 @@ class _RaceNumberBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 42,
-      height: 42,
+      width: 44,
+      height: 44,
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: [
+            const Color(0xFF2E7D32),
             AppTheme.primaryGreen,
-            AppTheme.primaryGreen.withValues(alpha: 0.7),
+            const Color(0xFF0D3810),
           ],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
+          stops: const [0.0, 0.6, 1.0],
         ),
-        borderRadius: BorderRadius.circular(11),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: AppTheme.accentGold.withValues(alpha: 0.28),
+          width: 1,
+        ),
         boxShadow: [
           BoxShadow(
-            color: AppTheme.primaryGreen.withValues(alpha: 0.3),
-            blurRadius: 6,
-            offset: const Offset(0, 2),
+            color: AppTheme.primaryGreen.withValues(alpha: 0.45),
+            blurRadius: 10,
+            spreadRadius: -2,
+            offset: const Offset(0, 3),
           ),
         ],
       ),
@@ -358,7 +422,15 @@ class _RaceNumberBadge extends StatelessWidget {
           style: const TextStyle(
             color: Colors.white,
             fontSize: 18,
-            fontWeight: FontWeight.w800,
+            fontWeight: FontWeight.w900,
+            letterSpacing: -0.5,
+            shadows: [
+              Shadow(
+                color: Colors.black45,
+                blurRadius: 4,
+                offset: Offset(0, 1),
+              ),
+            ],
           ),
         ),
       ),
@@ -374,20 +446,24 @@ class _MiniStat extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(icon, size: 13, color: Colors.grey.shade500),
-        const SizedBox(width: 3),
-        Text(
-          value,
-          style: TextStyle(
-            fontSize: 12,
-            color: Colors.grey.shade400,
-            fontWeight: FontWeight.w500,
+    return Padding(
+      padding: const EdgeInsets.only(right: 6),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 13, color: Colors.grey.shade500),
+          const SizedBox(width: 4),
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: 12,
+              color: Colors.grey.shade300,
+              fontWeight: FontWeight.w600,
+              letterSpacing: -0.1,
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }
