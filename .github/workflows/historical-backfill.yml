@@ -1,0 +1,47 @@
+name: historical-backfill
+
+on:
+  workflow_dispatch:
+    inputs:
+      start:
+        description: "시작일(YYYYMMDD)"
+        required: true
+        type: string
+      end:
+        description: "종료일(YYYYMMDD)"
+        required: true
+        type: string
+      meets:
+        description: "경마장 코드(공백 구분)"
+        required: true
+        default: "1 2 3"
+        type: string
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install -r ml_backend/requirements.txt
+      - name: Backfill KRA races, entries and results
+        working-directory: ml_backend
+        env:
+          KRA_SERVICE_KEY: ${{ secrets.KRA_SERVICE_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$KRA_SERVICE_KEY"
+          test -n "$SUPABASE_URL"
+          test -n "$SUPABASE_SERVICE_KEY"
+          for meet in ${{ inputs.meets }}; do
+            python -m app.sync_service \
+              --meet "$meet" \
+              --start "${{ inputs.start }}" \
+              --end "${{ inputs.end }}"
+          done

@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 import xgboost as xgb
 from sklearn.model_selection import TimeSeriesSplit
+from sklearn.isotonic import IsotonicRegression
 from sklearn.metrics import (
     accuracy_score,
     roc_auc_score,
@@ -174,17 +175,19 @@ def _cross_validate_model(
     params_fn,
     X: pd.DataFrame,
     y: pd.Series,
+    race_keys: pd.Series,
     n_splits: int,
 ) -> dict:
-    """TimeSeriesSplit CV로 단일 모델을 평가합니다."""
+    """동일 경주의 말이 양쪽에 섞이지 않는 시간순 CV로 평가합니다."""
     pos = y.sum()
     neg = len(y) - pos
     spw = neg / max(pos, 1)
 
-    tscv = TimeSeriesSplit(n_splits=n_splits)
     fold_metrics = []
 
-    for fold, (train_idx, val_idx) in enumerate(tscv.split(X)):
+    for fold, (train_idx, val_idx) in enumerate(
+        _race_group_time_splits(race_keys, n_splits)
+    ):
         X_tr, X_vl = X.iloc[train_idx], X.iloc[val_idx]
         y_tr, y_vl = y.iloc[train_idx], y.iloc[val_idx]
 
@@ -204,6 +207,54 @@ def _cross_validate_model(
         "avg_logloss": avg_ll,
         "fold_details": fold_metrics,
     }
+
+
+def _race_group_time_splits(
+    race_keys: pd.Series,
+    n_splits: int,
+):
+    """경주를 최소 분할 단위로 유지하는 expanding-window split."""
+    ordered_races = list(dict.fromkeys(race_keys.tolist()))
+    if len(ordered_races) <= n_splits:
+        raise ValueError(
+            f"시간순 CV에 필요한 경주 수 부족: {len(ordered_races)} (splits={n_splits})"
+        )
+    splitter = TimeSeriesSplit(n_splits=n_splits)
+    key_values = race_keys.to_numpy()
+    for train_races, val_races in splitter.split(ordered_races):
+        train_set = {ordered_races[i] for i in train_races}
+        val_set = {ordered_races[i] for i in val_races}
+        train_idx = np.flatnonzero(np.isin(key_values, list(train_set)))
+        val_idx = np.flatnonzero(np.isin(key_values, list(val_set)))
+        yield train_idx, val_idx
+
+
+def _fit_probability_calibrator(
+    name: str,
+    params_fn,
+    X: pd.DataFrame,
+    y: pd.Series,
+    race_keys: pd.Series,
+    n_splits: int,
+) -> IsotonicRegression:
+    """시간순 OOF 예측만으로 확률 보정기를 학습합니다."""
+    probabilities: list[float] = []
+    labels: list[int] = []
+    spw = (len(y) - y.sum()) / max(y.sum(), 1)
+    for train_idx, val_idx in _race_group_time_splits(race_keys, n_splits):
+        model = _build_and_fit(
+            name,
+            params_fn(spw),
+            X.iloc[train_idx],
+            y.iloc[train_idx],
+            X.iloc[val_idx],
+            y.iloc[val_idx],
+        )
+        probabilities.extend(model.predict_proba(X.iloc[val_idx])[:, 1].tolist())
+        labels.extend(y.iloc[val_idx].astype(int).tolist())
+    calibrator = IsotonicRegression(out_of_bounds="clip")
+    calibrator.fit(probabilities, labels)
+    return calibrator
 
 
 def _train_final_model(
@@ -376,7 +427,9 @@ def train_model(
     df = pd.read_csv(data_path)
     print(f"전체 {len(df)}행 로드")
 
-    df = df.sort_values(["race_date", "race_no", "horse_no"]).reset_index(drop=True)
+    df = df.sort_values(
+        ["race_date", "meet", "race_no", "horse_no"]
+    ).reset_index(drop=True)
 
     available_models: dict[str, callable] = {"xgboost": _xgb_params}
     if HAS_LIGHTGBM:
@@ -403,6 +456,14 @@ def train_model(
         print(f"{'='*60}")
 
         X, y = prepare_xy(df, target=target_name)
+        race_keys = (
+            df.loc[X.index, ["meet", "race_date", "race_no"]]
+            .astype(str)
+            .agg("|".join, axis=1)
+            .reset_index(drop=True)
+        )
+        X = X.reset_index(drop=True)
+        y = y.reset_index(drop=True)
         print(f"피처 shape: {X.shape}, 양성 비율: {y.mean():.4f}")
 
         comparison = {}
@@ -410,7 +471,7 @@ def train_model(
             print(f"\n  [{model_name}] CV 시작...")
             try:
                 cv_result = _cross_validate_model(
-                    model_name, params_fn, X, y, n_splits,
+                    model_name, params_fn, X, y, race_keys, n_splits,
                 )
                 comparison[model_name] = cv_result
                 print(
@@ -435,6 +496,20 @@ def train_model(
         model_path = os.path.join(MODEL_DIR, f"{target_name}_model.pkl")
         joblib.dump(final_model, model_path)
         print(f"  모델 저장: {model_path}")
+
+        calibrator = _fit_probability_calibrator(
+            best_name,
+            available_models[best_name],
+            X,
+            y,
+            race_keys,
+            n_splits,
+        )
+        calibrator_path = os.path.join(
+            MODEL_DIR, f"{target_name}_calibrator.pkl"
+        )
+        joblib.dump(calibrator, calibrator_path)
+        print(f"  확률 보정기 저장: {calibrator_path}")
 
         importance = _get_feature_importance(final_model, X.columns.tolist())
         if importance:

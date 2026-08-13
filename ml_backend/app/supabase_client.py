@@ -5,7 +5,7 @@ Supabase 클라이언트 모듈.
 """
 
 from supabase import create_client, Client
-from app.config import SUPABASE_URL, SUPABASE_ANON_KEY
+from app.config import SUPABASE_ANON_KEY, SUPABASE_SERVICE_KEY, SUPABASE_URL
 
 _client: Client | None = None
 
@@ -13,7 +13,10 @@ _client: Client | None = None
 def get_client() -> Client:
     global _client
     if _client is None:
-        _client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+        key = SUPABASE_SERVICE_KEY or SUPABASE_ANON_KEY
+        if not SUPABASE_URL or not key:
+            raise RuntimeError("SUPABASE_URL과 Supabase API key가 필요합니다.")
+        _client = create_client(SUPABASE_URL, key)
     return _client
 
 
@@ -67,7 +70,8 @@ def upsert_predictions(rows: list[dict]):
         return
     client = get_client()
     client.table("predictions").upsert(
-        rows, on_conflict="meet,race_date,race_no,horse_no"
+        rows,
+        on_conflict="meet,race_date,race_no,horse_no,model_version",
     ).execute()
     print(f"[SUPABASE] predictions {len(rows)}건 upsert")
 

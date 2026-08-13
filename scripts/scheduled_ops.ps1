@@ -18,10 +18,10 @@ foreach ($f in $envFiles) {
     }
 }
 if (-not $env:SINCE) {
-    $env:SINCE = (Get-Date).AddDays(-14).ToString("yyyyMMdd")
+    $env:SINCE = (Get-Date).AddDays(-90).ToString("yyyyMMdd")
 }
 $env:PYTHONPATH = (Join-Path $Root "backend") + ";" + $env:PYTHONPATH
 Write-Host "scheduled_ops SINCE=$($env:SINCE)"
 python (Join-Path $Root "backend\ops_sync.py") odds --since $env:SINCE --max-races 400 --sleep 0.35
-python (Join-Path $Root "backend\ops_sync.py") predictions --since $env:SINCE --max-races 800 --model-version heuristic-place-1.1
+python (Join-Path $Root "backend\ops_sync.py") predictions --since $env:SINCE --max-races 2500 --model-version heuristic-place-1.3
 Write-Host "scheduled_ops done"

@@ -5,7 +5,7 @@ Top1/Top3 적중률 + 확률 보정(Brier score) 기준으로 가중치를 탐�
 
 사용 예시:
   python backend/tune_heuristic_predictions.py --meet 1 --since 20250101 --trials 180
-  python backend/tune_heuristic_predictions.py --sync-predictions --model-version heuristic-place-1.1
+  python backend/tune_heuristic_predictions.py --sync-predictions
 """
 
 from __future__ import annotations
@@ -22,6 +22,7 @@ from typing import Any
 from supabase import create_client
 
 from config import SUPABASE_SERVICE_KEY, SUPABASE_URL
+from prediction_constants import MAX_TRAINING_RACES, MODEL_VERSION
 
 
 @dataclass
@@ -65,7 +66,12 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="특정 시행일만(YYYYMMDD). 지정 시 since/until 대신 해당 일만 사용",
     )
-    parser.add_argument("--max-races", type=int, default=800, help="튜닝에 사용할 최대 경주 수")
+    parser.add_argument(
+        "--max-races",
+        type=int,
+        default=MAX_TRAINING_RACES,
+        help="튜닝에 사용할 최대 경주 수",
+    )
     parser.add_argument("--trials", type=int, default=160, help="랜덤 탐색 횟수")
     parser.add_argument("--seed", type=int, default=42, help="난수 시드")
     parser.add_argument(
@@ -75,8 +81,13 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--model-version",
-        default="heuristic-place-1.1",
+        default=MODEL_VERSION,
         help="동기화 시 사용할 model_version",
+    )
+    parser.add_argument(
+        "--include-market-odds",
+        action="store_true",
+        help="수집 시점이 보장된 사전 배당만 학습에 포함(기본값: 누출 방지를 위해 제외)",
     )
     parser.add_argument(
         "--output",
@@ -252,6 +263,7 @@ def _build_race_dataset(
     max_races: int,
     until: str | None = None,
     on: str | None = None,
+    include_market_odds: bool = False,
 ) -> list[dict[str, Any]]:
     all_results = _fetch_all_rows(
         client,
@@ -305,39 +317,41 @@ def _build_race_dataset(
         key = (str(row.get("meet", "")), str(row.get("race_date", "")), race_no)
         distance_by_race[key] = _safe_int(row.get("distance", 0), 1400)
 
-    all_odds = _fetch_all_rows(
-        client,
-        "odds",
-        "meet,race_date,race_no,bet_type,horse_no1,rate",
-    )
-    if meet:
-        all_odds = [o for o in all_odds if str(o.get("meet", "")) == meet]
-    all_odds = _filter_by_race_date(
-        all_odds, since=since, until=until, on=on
-    )
-
     win_odds_by_race: dict[tuple[str, str, int], dict[int, float]] = {}
-    for row in all_odds:
-        if str(row.get("bet_type", "")).upper() != "WIN":
-            continue
-        race_no = _safe_int(row.get("race_no", 0))
-        if race_no <= 0:
-            continue
-        k = (str(row.get("meet", "")), str(row.get("race_date", "")), race_no)
-        horse_no = _safe_int(row.get("horse_no1", 0))
-        rate = _safe_float(row.get("rate", 0.0), 0.0)
-        if horse_no <= 0 or rate <= 0:
-            continue
-        m = win_odds_by_race.setdefault(k, {})
-        prev = m.get(horse_no)
-        if prev is None or rate < prev:
-            m[horse_no] = rate
+    if include_market_odds:
+        all_odds = _fetch_all_rows(
+            client,
+            "odds",
+            "meet,race_date,race_no,bet_type,horse_no1,rate",
+        )
+        if meet:
+            all_odds = [o for o in all_odds if str(o.get("meet", "")) == meet]
+        all_odds = _filter_by_race_date(
+            all_odds, since=since, until=until, on=on
+        )
+        for row in all_odds:
+            if str(row.get("bet_type", "")).upper() != "WIN":
+                continue
+            race_no = _safe_int(row.get("race_no", 0))
+            if race_no <= 0:
+                continue
+            k = (str(row.get("meet", "")), str(row.get("race_date", "")), race_no)
+            horse_no = _safe_int(row.get("horse_no1", 0))
+            rate = _safe_float(row.get("rate", 0.0), 0.0)
+            if horse_no <= 0 or rate <= 0:
+                continue
+            m = win_odds_by_race.setdefault(k, {})
+            prev = m.get(horse_no)
+            if prev is None or rate < prev:
+                m[horse_no] = rate
 
     race_keys = sorted(
         set(results_by_race.keys()) & set(entries_by_race.keys()),
         key=lambda x: (x[1], x[2]),
-        reverse=True,
+        reverse=False,
     )
+    if max_races > 0:
+        race_keys = race_keys[-max_races:]
 
     samples: list[dict[str, Any]] = []
     for key in race_keys:
@@ -369,9 +383,6 @@ def _build_race_dataset(
                 "win_odds": win_odds_by_race.get(key, {}),
             }
         )
-        if max_races > 0 and len(samples) >= max_races:
-            break
-
     return samples
 
 
@@ -462,7 +473,7 @@ def _race_probabilities(
         pace_comp = _pace_score(style=style, pace_pressure=pace_pressure, front_count=front_count)
         condition_comp = _condition_score(e, min_hw, max_hw)
 
-        s = 1.0 - params.w_market
+        s = 1.0 - market_w
         base_score = s * (
             params.w_rating * rating_comp
             + params.w_perf * perf_comp
@@ -635,7 +646,12 @@ def heuristic_params_from_dict(
     )
 
 
-def _mutate(base: HeuristicParams, rng: random.Random) -> HeuristicParams:
+def _mutate(
+    base: HeuristicParams,
+    rng: random.Random,
+    *,
+    allow_market: bool = False,
+) -> HeuristicParams:
     def n(value: float, scale: float, lo: float, hi: float) -> float:
         return max(lo, min(hi, value + rng.uniform(-scale, scale)))
 
@@ -645,8 +661,8 @@ def _mutate(base: HeuristicParams, rng: random.Random) -> HeuristicParams:
         w_class_form=n(base.w_class_form, 0.08, 0.03, 0.50),
         w_pace=n(base.w_pace, 0.06, 0.01, 0.35),
         w_condition=n(base.w_condition, 0.06, 0.01, 0.35),
-        w_market=n(base.w_market, 0.04, 0.0, 0.30),
-        rating_pow=n(base.rating_pow, 0.25, 0.8, 2.2),
+        w_market=n(base.w_market, 0.04, 0.0, 0.30) if allow_market else 0.0,
+        rating_pow=n(base.rating_pow, 0.25, 0.8, 3.5),
         prior_weight=n(base.prior_weight, 2.5, 2.0, 18.0),
         temp_scale=n(base.temp_scale, 0.20, 0.75, 1.35),
         reliability_penalty=n(base.reliability_penalty, 0.07, 0.02, 0.35),
@@ -722,12 +738,21 @@ def main() -> None:
         max_races=args.max_races,
         until=args.until,
         on=args.on_date,
+        include_market_odds=args.include_market_odds,
     )
     if not samples:
         print("튜닝 가능한 경주 데이터가 없습니다.")
         return
 
-    print(f"[INFO] 튜닝 대상 경주 수: {len(samples)}")
+    split_index = max(1, int(len(samples) * 0.8))
+    tune_samples = samples[:split_index]
+    validation_samples = samples[split_index:]
+    if not validation_samples:
+        validation_samples = tune_samples
+    print(
+        f"[INFO] 시간순 분할: 튜닝 {len(tune_samples)}경주 / "
+        f"검증 {len(validation_samples)}경주"
+    )
 
     baseline = _normalize_weights(
         HeuristicParams(
@@ -744,7 +769,7 @@ def main() -> None:
         )
     )
     best_params = baseline
-    best_metrics = _evaluate(samples, baseline)
+    best_metrics = _evaluate(tune_samples, baseline)
 
     print(
         "[BASE] objective={:.4f} top1={:.3f} top3_match={:.3f} top3_winner={:.3f} brier={:.4f}".format(
@@ -757,8 +782,16 @@ def main() -> None:
     )
 
     for trial in range(1, args.trials + 1):
-        candidate = _mutate(best_params, rng) if trial > 1 else baseline
-        metrics = _evaluate(samples, candidate)
+        candidate = (
+            _mutate(
+                best_params,
+                rng,
+                allow_market=args.include_market_odds,
+            )
+            if trial > 1
+            else baseline
+        )
+        metrics = _evaluate(tune_samples, candidate)
         if metrics["objective"] > best_metrics["objective"]:
             best_params = candidate
             best_metrics = metrics
@@ -773,6 +806,7 @@ def main() -> None:
                 )
             )
 
+    validation_metrics = _evaluate(validation_samples, best_params)
     result_payload = {
         "generated_at": datetime.now().isoformat(),
         "filters": {
@@ -783,10 +817,15 @@ def main() -> None:
             "max_races": args.max_races,
             "trials": args.trials,
             "seed": args.seed,
+            "include_market_odds": args.include_market_odds,
+        },
+        "train_metrics": {
+            k: round(v, 6) if isinstance(v, float) else v
+            for k, v in best_metrics.items()
         },
         "metrics": {
             k: round(v, 6) if isinstance(v, float) else v
-            for k, v in best_metrics.items()
+            for k, v in validation_metrics.items()
         },
         "objective_weights": {
             "top1_acc": 0.50,

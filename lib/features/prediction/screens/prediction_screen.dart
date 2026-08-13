@@ -232,7 +232,7 @@ class _ModelInfoCard extends StatelessWidget {
               borderRadius: BorderRadius.circular(8),
             ),
             child: Text(
-              'XGBoost',
+              report.modelVersion.startsWith('multi-') ? 'ML 앙상블' : '통계 모델',
               style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.w600,

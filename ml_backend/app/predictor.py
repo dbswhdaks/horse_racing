@@ -32,6 +32,8 @@ class HorseRacingPredictor:
     def __init__(self):
         self.win_model = None
         self.place_model = None
+        self.win_calibrator = None
+        self.place_calibrator = None
         self.ltr_model = None
         self.meta: dict = {}
         self.historical_df: pd.DataFrame | None = None
@@ -50,6 +52,8 @@ class HorseRacingPredictor:
 
         self.win_model = self._load_single("is_win")
         self.place_model = self._load_single("is_place")
+        self.win_calibrator = self._load_calibrator("is_win")
+        self.place_calibrator = self._load_calibrator("is_place")
         self.ltr_model = self._load_ltr()
 
     def _load_single(self, target: str):
@@ -80,6 +84,10 @@ class HorseRacingPredictor:
             print(f"[MODEL] LTR 모델 로드 완료: {ltr_path}")
             return model
         return None
+
+    def _load_calibrator(self, target: str):
+        path = os.path.join(MODEL_DIR, f"{target}_calibrator.pkl")
+        return joblib.load(path) if os.path.exists(path) else None
 
     def _load_historical(self):
         """롤링 피처 계산을 위한 과거 데이터를 캐시합니다."""
@@ -167,14 +175,21 @@ class HorseRacingPredictor:
         featured = self._engineer_with_history(current_df)
 
         feature_names = self.meta.get("feature_names", FEATURE_COLUMNS)
-        available = [c for c in feature_names if c in featured.columns]
-        X = featured[available].fillna(0)
+        X = featured.reindex(columns=feature_names, fill_value=0).fillna(0)
 
         win_proba = self.win_model.predict_proba(X)[:, 1]
+        if self.win_calibrator is not None:
+            win_proba = self.win_calibrator.predict(win_proba)
+        win_total = float(np.sum(win_proba))
+        if win_total > 0:
+            win_proba = win_proba / win_total
 
         place_proba = np.zeros(len(X))
         if self.place_model is not None:
             place_proba = self.place_model.predict_proba(X)[:, 1]
+            if self.place_calibrator is not None:
+                place_proba = self.place_calibrator.predict(place_proba)
+            place_proba = np.clip(place_proba, win_proba, 1.0)
 
         ltr_scores = None
         if self.ltr_model is not None:
@@ -201,13 +216,13 @@ class HorseRacingPredictor:
             feat_imp = {}
             if hasattr(self.win_model, "feature_importances_"):
                 for k in importance_keys:
-                    idx = available.index(k) if k in available else -1
+                    idx = feature_names.index(k) if k in feature_names else -1
                     if idx >= 0:
                         feat_imp[k] = float(self.win_model.feature_importances_[idx])
             elif hasattr(self.win_model, "get_feature_importance"):
                 fi = self.win_model.get_feature_importance()
                 for k in importance_keys:
-                    idx = available.index(k) if k in available else -1
+                    idx = feature_names.index(k) if k in feature_names else -1
                     if idx >= 0 and idx < len(fi):
                         feat_imp[k] = float(fi[idx])
 
@@ -226,7 +241,20 @@ class HorseRacingPredictor:
             predictions.append(pred_entry)
 
         if ltr_scores is not None:
-            predictions.sort(key=lambda x: -x.get("rank_score", 0))
+            ltr_min = float(np.min(ltr_scores))
+            ltr_span = float(np.max(ltr_scores) - ltr_min)
+            for prediction in predictions:
+                normalized_ltr = (
+                    (prediction["rank_score"] - ltr_min) / ltr_span
+                    if ltr_span > 0
+                    else 0.5
+                )
+                prediction["ensemble_score"] = round(
+                    (prediction["win_probability"] / 100.0) * 0.7
+                    + normalized_ltr * 0.3,
+                    6,
+                )
+            predictions.sort(key=lambda x: -x["ensemble_score"])
         else:
             predictions.sort(key=lambda x: -x["win_probability"])
 

@@ -1,0 +1,38 @@
+name: weekly-ml-train
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    - cron: "30 3 * * 0"
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: ml_backend/requirements.txt
+      - name: Install ML dependencies
+        run: pip install -r ml_backend/requirements.txt
+      - name: Export pre-race dataset and train
+        working-directory: ml_backend
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: |
+          set -euo pipefail
+          python -m app.supabase_dataset --since 20240101
+          python -m app.trainer --splits 5
+      - name: Upload versioned model bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: horse-racing-ml-models-${{ github.run_id }}
+          path: |
+            ml_backend/models/*.pkl
+            ml_backend/models/model_meta.json
+          if-no-files-found: error
+          retention-days: 30

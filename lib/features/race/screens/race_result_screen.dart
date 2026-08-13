@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/constants/api_constants.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/utils/prediction_evaluation.dart';
 import '../../../core/widgets/in_app_webview_screen.dart';
 import '../../../core/widgets/shimmer_loading.dart';
 import '../../../models/odds.dart';
@@ -19,8 +20,10 @@ import '../providers/race_providers.dart';
 /// - 디버그 빌드(kDebugMode)는 자동으로 통과한다.
 /// - 릴리스 빌드에서 통과하려면 빌드 시
 ///   `--dart-define=DEV_BYPASS_PAYWALL=true` 옵션을 함께 지정한다.
-const bool _kDevBypassPaywall =
-    bool.fromEnvironment('DEV_BYPASS_PAYWALL', defaultValue: false);
+const bool _kDevBypassPaywall = bool.fromEnvironment(
+  'DEV_BYPASS_PAYWALL',
+  defaultValue: false,
+);
 
 class RaceResultScreen extends ConsumerWidget {
   final String meet;
@@ -246,7 +249,10 @@ class RaceResultScreen extends ConsumerWidget {
                       (e) => _DetailedResultCard(
                         result: e.value,
                         displayRank: e.key + 1,
-                        prediction: _findPrediction(predictions, e.value.horseNo),
+                        prediction: _findPrediction(
+                          predictions,
+                          e.value.horseNo,
+                        ),
                         canViewPredictionRemark: canViewPredictionRemark,
                         onHorseTap: () => context.push(
                           '/horse/${Uri.encodeComponent(e.value.horseName)}?meet=$meet',
@@ -868,14 +874,6 @@ class _AiComparisonSectionState extends State<_AiComparisonSection> {
     return '후입';
   }
 
-  int _countHits(List<int> picks, List<RaceResult> actual) {
-    int hits = 0;
-    for (final no in picks) {
-      if (actual.any((r) => r.horseNo == no)) hits++;
-    }
-    return hits;
-  }
-
   @override
   Widget build(BuildContext context) {
     final sorted = [...widget.predictions]
@@ -915,28 +913,27 @@ class _AiComparisonSectionState extends State<_AiComparisonSection> {
 
     int toGate(int horseNo) => gateByHorseNo[horseNo] ?? horseNo;
 
-    // AI: 승률순 1·2·3착 pick vs 실제 1·2·3착(칸별 정확도)
-    int aiPosHits = 0;
-    for (int i = 0; i < 3; i++) {
-      if (i >= sorted.length) break;
-      final at = widget.results.where((r) => r.rank == i + 1).firstOrNull;
-      if (at != null && at.horseNo == toGate(sorted[i].horseNo)) aiPosHits++;
-    }
+    final actualPositions = actualTop3Sorted
+        .map<int?>((result) => result.horseNo)
+        .toList();
+    final aiPositions = sorted
+        .take(3)
+        .map<int?>((prediction) => toGate(prediction.horseNo))
+        .toList();
     final compTop3 = _compPicks.take(3).whereType<int>().toList();
-    final compHits = _countHits(
-      compTop3.map(toGate).toList(),
-      actualTop3Sorted,
-    );
     final userTop3 = _userPicks.take(3).whereType<int>().toList();
-    final userHits = _countHits(
-      userTop3.map(toGate).toList(),
-      actualTop3Sorted,
+    final aiAcc = PredictionEvaluation.positionAccuracy(
+      predicted: aiPositions,
+      actual: actualPositions,
     );
-
-    double pct(int hits, int total) => total > 0 ? hits / total * 100 : 0;
-    final aiAcc = pct(aiPosHits, 3);
-    final compAcc = pct(compHits, compTop3.length);
-    final userAcc = pct(userHits, userTop3.length);
+    final compAcc = PredictionEvaluation.positionAccuracy(
+      predicted: compTop3.map<int?>((horseNo) => toGate(horseNo)).toList(),
+      actual: actualPositions,
+    );
+    final userAcc = PredictionEvaluation.positionAccuracy(
+      predicted: userTop3.map<int?>((horseNo) => toGate(horseNo)).toList(),
+      actual: actualPositions,
+    );
 
     Color accColor(double v) => v >= 66
         ? AppTheme.positiveGreen

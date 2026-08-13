@@ -23,8 +23,10 @@ import '../widgets/race_auto_refresh_hook.dart';
 /// - 디버그 빌드(kDebugMode)는 자동으로 통과한다.
 /// - 릴리스 빌드에서 통과하려면 빌드 시
 ///   `--dart-define=DEV_BYPASS_PAYWALL=true` 옵션을 함께 지정한다.
-const bool _kDevBypassPaywall =
-    bool.fromEnvironment('DEV_BYPASS_PAYWALL', defaultValue: false);
+const bool _kDevBypassPaywall = bool.fromEnvironment(
+  'DEV_BYPASS_PAYWALL',
+  defaultValue: false,
+);
 
 class RaceEntryScreen extends ConsumerWidget {
   final String meet;
@@ -200,13 +202,18 @@ class RaceEntryScreen extends ConsumerWidget {
                     // ── AI 추천 탭 ──
                     Consumer(
                       builder: (context, ref, _) {
-                        final resultsAsync = ref.watch(
-                          raceResultProvider((
-                            meet: meet,
-                            date: date,
-                            raceNo: raceNo,
-                          )),
-                        );
+                        final results = _isRaceFinished(race)
+                            ? ref
+                                      .watch(
+                                        raceResultProvider((
+                                          meet: meet,
+                                          date: date,
+                                          raceNo: raceNo,
+                                        )),
+                                      )
+                                      .valueOrNull ??
+                                  const <RaceResult>[]
+                            : const <RaceResult>[];
                         return _buildAiTab(
                           context,
                           entriesAsync,
@@ -214,7 +221,7 @@ class RaceEntryScreen extends ConsumerWidget {
                           predAsync,
                           canViewAiRecommendation,
                           iapState,
-                          results: resultsAsync.valueOrNull ?? const [],
+                          results: results,
                         );
                       },
                     ),
@@ -246,11 +253,8 @@ class RaceEntryScreen extends ConsumerWidget {
       ],
     );
 
-    // 종합추천 카드는 entries 와 AI 예측을 함께 사용해 점수를 매긴다.
-    // entries 만 먼저 도착해 그리면, AI 예측이 뒤따라 들어오는 순간
-    // 추천 순위·점수가 재계산되어 화면이 "한 번 끊겼다가 다시 자세하게"
-    // 보이는 깜빡임이 생긴다. 두 데이터가 모두 준비된 뒤 한 번에 그린다.
-    if (entriesAsync.isLoading || predAsync.isLoading) {
+    // 출마표는 예측보다 먼저 표시하고, AI 점수는 준비되는 즉시 갱신한다.
+    if (entriesAsync.isLoading) {
       return shimmer();
     }
 
@@ -282,12 +286,19 @@ class RaceEntryScreen extends ConsumerWidget {
           return const Center(child: Text('출마 정보가 없습니다'));
         }
 
-        // ── 결과 페이지 데이터를 가져와 entries/odds 를 보강한다.
-        // 마체중·단승배당·실제 게이트 번호는 결과 API 가 더 정확하다.
-        final resultsAsync = ref.watch(
-          raceResultProvider((meet: meet, date: date, raceNo: raceNo)),
-        );
-        final results = resultsAsync.valueOrNull ?? const <RaceResult>[];
+        // 종료된 경주만 결과 데이터로 마체중·게이트를 보강한다.
+        final results = _isRaceFinished(race)
+            ? ref
+                      .watch(
+                        raceResultProvider((
+                          meet: meet,
+                          date: date,
+                          raceNo: raceNo,
+                        )),
+                      )
+                      .valueOrNull ??
+                  const <RaceResult>[]
+            : const <RaceResult>[];
         final nameToResult = <String, RaceResult>{
           for (final r in results)
             if (r.horseName.isNotEmpty) r.horseName: r,
@@ -577,11 +588,7 @@ class RaceEntryScreen extends ConsumerWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(
-                Icons.auto_awesome,
-                size: 48,
-                color: Colors.purple.shade300,
-              ),
+              Icon(Icons.auto_awesome, size: 48, color: Colors.purple.shade300),
               const SizedBox(height: 12),
               const Text(
                 'AI 예측 데이터를 준비 중입니다',
@@ -613,7 +620,9 @@ class RaceEntryScreen extends ConsumerWidget {
         // 출주표 이름으로 보정해 (번호, 이름) 쌍이 항상 일치하도록 한다.
         final correctedPredictions = report.predictions.map((p) {
           final entryName = nameByEntryHorseNo[p.horseNo];
-          if (entryName == null || entryName.isEmpty || entryName == p.horseName) {
+          if (entryName == null ||
+              entryName.isEmpty ||
+              entryName == p.horseName) {
             return p;
           }
           return Prediction(
@@ -1273,9 +1282,7 @@ class RaceEntryScreen extends ConsumerWidget {
   ///  - chulNo 가 누락되어 entry.horseNo 가 hrNo(5자리)인 경우에도
   ///    실제 게이트와 동일한 1자리 번호로 표시된다.
   static Map<int, int> _buildGateMap(List<RaceEntry> entries) {
-    return {
-      for (var i = 0; i < entries.length; i++) entries[i].horseNo: i + 1,
-    };
+    return {for (var i = 0; i < entries.length; i++) entries[i].horseNo: i + 1};
   }
 
   /// 결과 페이지 데이터가 있으면 결과 API의 `horseNo`(=gtno, 실제 게이트)를
@@ -2412,8 +2419,7 @@ class _ComprehensiveRecommendation extends StatelessWidget {
 
     // ─── 4) 컴포넌트별 점수 산정 ───
     // (a) 레이팅: 1순위 rating, 대체 신호로 AI 우승확률
-    double ratingSignal(RaceEntry e) =>
-        ratingHasInfo ? e.rating : aiWin(e);
+    double ratingSignal(RaceEntry e) => ratingHasInfo ? e.rating : aiWin(e);
     final ratingPts = rankPoints(ratingSignal, 25);
 
     // (b) 성적: 승률·입상률·경험. 데이터 없으면 AI 입상확률
@@ -2423,6 +2429,7 @@ class _ComprehensiveRecommendation extends StatelessWidget {
       }
       return aiPlace(e);
     }
+
     final perfPts = rankPoints(perfSignal, 25);
 
     // (c) AI/배당 (기존 '기수' 자리): AI 입상확률 + 시장확률 가중평균
@@ -2434,6 +2441,7 @@ class _ComprehensiveRecommendation extends StatelessWidget {
       if (aiHasInfo) return ap;
       return e.rating; // 둘 다 없으면 rating 으로 폴백
     }
+
     final aiOddsPts = rankPoints(aiOddsSignal, 20);
 
     // (d) 거리: 출주 경험·승수. 없으면 부담중량(주행 능력 추정) → AI 우승확률
@@ -2443,6 +2451,7 @@ class _ComprehensiveRecommendation extends StatelessWidget {
       }
       return aiWin(e);
     }
+
     final distPts = rankPoints(distSignal, 15);
 
     // (e) 전개: 분위기 + style + rating 보정
@@ -2478,6 +2487,7 @@ class _ComprehensiveRecommendation extends StatelessWidget {
       }
       return base;
     }
+
     final pacePts = rankPoints(paceSignal, 15);
 
     // ─── 5) 사유(reason) 빌더 ───
@@ -2721,8 +2731,7 @@ class _PremiumSubscriptionPaywallState
                 // - iOS 웹: Android 앱을 설치할 수 없으므로 안내 화면(/subscription)으로 이동
                 // - 그 외 웹(Android/Desktop): 곧바로 Play Store 앱 페이지로 이동
                 if (kIsWeb) {
-                  final isIosWeb =
-                      defaultTargetPlatform == TargetPlatform.iOS;
+                  final isIosWeb = defaultTargetPlatform == TargetPlatform.iOS;
                   if (isIosWeb) {
                     if (!context.mounted) return;
                     context.push('/subscription?plan=$_selectedProductId');
@@ -2937,8 +2946,9 @@ class _HorseCard extends StatelessWidget {
         ? stats!.placeCount
         : entry.placeCount;
     final winRate = totalRaces > 0 ? winCount / totalRaces * 100 : 0.0;
-    final placeRate =
-        totalRaces > 0 ? (winCount + placeCount) / totalRaces * 100 : 0.0;
+    final placeRate = totalRaces > 0
+        ? (winCount + placeCount) / totalRaces * 100
+        : 0.0;
 
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
@@ -3469,8 +3479,7 @@ class _NumberRecommenderState extends State<_NumberRecommender> {
     // 5자리 마번이 보이지 않도록, 출주표 정렬 위치(1자리)를 표시 번호로 사용한다.
     final gateMap =
         widget.gateByHorseNo ?? RaceEntryScreen._buildGateMap(widget.entries);
-    String displayNo(int horseNo) =>
-        (gateMap[horseNo] ?? horseNo).toString();
+    String displayNo(int horseNo) => (gateMap[horseNo] ?? horseNo).toString();
 
     return Container(
       margin: EdgeInsets.symmetric(horizontal: widget.horizontalMargin),

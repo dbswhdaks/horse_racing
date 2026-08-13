@@ -13,11 +13,11 @@ on:
       max_races:
         description: "사용할 최대 경주 수"
         type: string
-        default: "800"
+        default: "2500"
       sync_predictions:
         description: "튜닝 후 Supabase predictions까지 업서트(1/0)"
         type: string
-        default: "0"
+        default: "1"
   schedule:
     # 매주 일요일 UTC 03:00
     - cron: "0 3 * * 0"
@@ -65,11 +65,11 @@ jobs:
           MAXR="${{ github.event.inputs.max_races }}"
           SYNC="${{ github.event.inputs.sync_predictions }}"
           if [ -z "$TRIALS" ] || [ "$TRIALS" = "null" ]; then TRIALS=500; fi
-          if [ -z "$MAXR" ] || [ "$MAXR" = "null" ]; then MAXR=800; fi
-          if [ -z "$SYNC" ] || [ "$SYNC" = "null" ]; then SYNC=0; fi
+          if [ -z "$MAXR" ] || [ "$MAXR" = "null" ]; then MAXR=2500; fi
+          if [ -z "$SYNC" ] || [ "$SYNC" = "null" ]; then SYNC=1; fi
           CMD=(python backend/tune_heuristic_predictions.py --trials "$TRIALS" --max-races "$MAXR" --output backend/models/heuristic_tuned_params.json)
           if [ "$SYNC" = "1" ] || [ "$SYNC" = "true" ] || [ "$SYNC" = "yes" ]; then
-            CMD+=("--sync-predictions" "--model-version" "heuristic-place-1.1")
+            CMD+=("--sync-predictions" "--model-version" "heuristic-place-1.3")
           fi
           echo "Running: ${CMD[*]}"
           "${CMD[@]}"

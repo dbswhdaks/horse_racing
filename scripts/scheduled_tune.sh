@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 휴리스틱 튜닝(주간·수동) — operations/data가 Supabase에 있어야 함
 # env: SUPABASE_URL, SUPABASE_SERVICE_KEY
-#   TUNE_TRIALS (default 500), TUNE_MAX_RACES (default 800), TUNE_SINCE (optional yyyymmdd)
+#   TUNE_TRIALS (default 500), TUNE_MAX_RACES (default 2500), TUNE_SINCE (optional yyyymmdd)
 #   TUNE_AUTO_SYNC=1 이면 튜닝 뒤 predictions 테이블까지 upsert
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -20,14 +20,14 @@ if [[ -f "$ROOT/backend/.env" ]]; then
 fi
 export PYTHONPATH="${ROOT}/backend${PYTHONPATH:+:$PYTHONPATH}"
 TUNE_TRIALS="${TUNE_TRIALS:-500}"
-TUNE_MAX_RACES="${TUNE_MAX_RACES:-800}"
+TUNE_MAX_RACES="${TUNE_MAX_RACES:-2500}"
 OUT=backend/models/heuristic_tuned_params.json
 args=(python backend/tune_heuristic_predictions.py --trials "$TUNE_TRIALS" --max-races "$TUNE_MAX_RACES" --output "$OUT")
 if [[ -n "${TUNE_SINCE:-}" ]]; then
   args+=("--since" "$TUNE_SINCE")
 fi
-if [[ "${TUNE_AUTO_SYNC:-0}" == "1" ]]; then
-  args+=("--sync-predictions" "--model-version" "heuristic-place-1.1")
+if [[ "${TUNE_AUTO_SYNC:-1}" == "1" ]]; then
+  args+=("--sync-predictions" "--model-version" "heuristic-place-1.3")
 fi
 echo "Running: ${args[*]}"
 exec "${args[@]}"

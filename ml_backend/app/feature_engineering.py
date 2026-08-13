@@ -28,7 +28,6 @@ BASE_FEATURE_COLUMNS = [
     "total_prize_log",
     "recent_prize_log",
     "field_size",
-    "win_odds",
     "horse_weight_diff",
     "weight_per_distance",
     "experience_score",
@@ -148,7 +147,9 @@ def add_rolling_features(df: pd.DataFrame, window: int = 5) -> pd.DataFrame:
     rank=0(미완주/예측용) 행은 롤링 계산에서 제외됩니다.
     """
     out = df.copy()
-    out = out.sort_values(["race_date", "race_no", "horse_no"]).reset_index(drop=True)
+    out = out.sort_values(
+        ["race_date", "meet", "race_no", "horse_no"]
+    ).reset_index(drop=True)
 
     out["_race_dt"] = pd.to_datetime(out["race_date"], format="%Y%m%d", errors="coerce")
 
@@ -309,7 +310,7 @@ def prepare_ltr_data(
     featured = featured[featured["rank"] > 0].copy()
 
     featured = featured.sort_values(
-        ["race_date", "race_no", "horse_no"]
+        ["race_date", "meet", "race_no", "horse_no"]
     ).reset_index(drop=True)
 
     race_max_rank = featured.groupby(
@@ -318,7 +319,7 @@ def prepare_ltr_data(
     featured["relevance"] = (race_max_rank - featured["rank"] + 1).clip(lower=0)
 
     groups = (
-        featured.groupby(["meet", "race_date", "race_no"])
+        featured.groupby(["meet", "race_date", "race_no"], sort=False)
         .size()
         .values
     )

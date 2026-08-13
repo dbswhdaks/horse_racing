@@ -10,8 +10,8 @@ Supabase 운영 파이프라인: KRA 배당(odds) 백필, 휴리스틱 predictio
   # races 전체(주의: 경주 수만큼 KRA 호출) — --max-races 0 = 상한 없음
   python backend/ops_sync.py odds --max-races 0 --sleep 0.4
 
-  # 휴리스틱 predictions(1.1) — on/since/until/tune이와 동일 필터
-  python backend/ops_sync.py predictions --on 20260426 --model-version heuristic-place-1.1
+  # 휴리스틱 predictions — on/since/until/tune과 동일 필터
+  python backend/ops_sync.py predictions --on 20260426
 
 필수 환경변수: SUPABASE_URL, SUPABASE_SERVICE_KEY, (odds) KRA_SERVICE_KEY
 
@@ -38,6 +38,7 @@ import httpx
 from supabase import create_client
 
 from config import KRA_BASE_URL, KRA_SERVICE_KEY, SUPABASE_SERVICE_KEY, SUPABASE_URL
+from prediction_constants import MAX_TRAINING_RACES, MODEL_VERSION
 from tune_heuristic_predictions import (
     _build_race_dataset,
     _fetch_all_rows,
@@ -243,18 +244,16 @@ def cmd_odds(args: argparse.Namespace) -> None:
                 f"→ {len(rows_out)}행 (원본 {len(items)}줄)"
             )
         else:
-            (
-                client.table("odds")
-                .delete()
-                .eq("meet", meet)
-                .eq("race_date", race_date)
-                .eq("race_no", race_no)
-                .execute()
-            )
             if rows_out:
                 for j in range(0, len(rows_out), 300):
                     batch = rows_out[j : j + 300]
-                    res = client.table("odds").insert(batch).execute()
+                    res = client.table("odds").upsert(
+                        batch,
+                        on_conflict=(
+                            "meet,race_date,race_no,bet_type,"
+                            "horse_no1,horse_no2,horse_no3"
+                        ),
+                    ).execute()
                     total_ins += len(res.data) if res.data else len(batch)
             print(
                 f"[odds] {i}/{len(keys)} {meet} {race_date} R{race_no} "
@@ -263,7 +262,7 @@ def cmd_odds(args: argparse.Namespace) -> None:
 
         time.sleep(args.sleep)
 
-    print(f"[odds] 완료. insert 행(대략): {total_ins}")
+    print(f"[odds] 완료. upsert 행(대략): {total_ins}")
 
 
 def _default_params_path() -> str:
@@ -347,10 +346,15 @@ def _build_parser() -> argparse.ArgumentParser:
         "--on", default=None, help="특정 시행일 YYYYMMDD만 (tune과 동일)"
     )
     p_pred.add_argument(
-        "--max-races", type=int, default=800, help="0이면 _build_race_dataset 상한 없음"
+        "--max-races",
+        type=int,
+        default=MAX_TRAINING_RACES,
+        help="0이면 _build_race_dataset 상한 없음",
     )
     p_pred.add_argument(
-        "--model-version", default="heuristic-place-1.1", help="predictions.model_version"
+        "--model-version",
+        default=MODEL_VERSION,
+        help="predictions.model_version",
     )
     p_pred.set_defaults(func=cmd_predictions)
 

@@ -82,7 +82,7 @@ def _parse_horse_weight(v) -> float:
 
 
 def build_training_row(result: dict, entry: dict | None) -> dict:
-    """경주결과 + 출전표 데이터를 합쳐 학습용 1행을 만듭니다."""
+    """결과 타깃과 경주 전 출전표 피처를 합쳐 학습용 1행을 만듭니다."""
     race_no = _safe_int(result.get("raceNo") or result.get("rcNo") or result.get("race_no"))
     horse_no = _safe_int(result.get("gtno") or result.get("chulNo") or result.get("hrNo"))
 
@@ -105,6 +105,12 @@ def build_training_row(result: dict, entry: dict | None) -> dict:
 
     if entry:
         row.update({
+            "burden_weight": _safe_float(
+                entry.get("wgBudam") or entry.get("wght") or row["burden_weight"]
+            ),
+            "horse_weight": _parse_horse_weight(
+                entry.get("hrWght") or row["horse_weight"]
+            ),
             "rating": _safe_float(entry.get("rating", 0)),
             "age": _safe_int(entry.get("age", 0)),
             "sex": str(entry.get("sex", "")),

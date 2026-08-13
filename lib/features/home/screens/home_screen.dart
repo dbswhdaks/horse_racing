@@ -119,8 +119,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                         ),
                         const SizedBox(height: 14),
                         Padding(
-                          padding:
-                              const EdgeInsets.symmetric(horizontal: 16),
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
                           child: _DateSelector(
                             date: selectedDate,
                             isToday: isToday,
@@ -139,8 +138,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 controller: _tabController,
                 children: List.generate(
                   _meets.length,
-                  (i) => _RaceListTab(
-                      meet: _meets[i], meetLabel: _meetLabels[i]),
+                  (i) =>
+                      _RaceListTab(meet: _meets[i], meetLabel: _meetLabels[i]),
                 ),
               ),
             ),
@@ -217,9 +216,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 // ── 햄버거(엔드) 드로어 ──
 
 class _AppDrawer extends StatelessWidget {
-  const _AppDrawer({
-    required this.onBranchesTap,
-  });
+  const _AppDrawer({required this.onBranchesTap});
 
   final VoidCallback onBranchesTap;
 
@@ -241,10 +238,7 @@ class _AppDrawer extends StatelessWidget {
     } catch (_) {}
 
     try {
-      final ok = await launchUrl(
-        webUri,
-        mode: LaunchMode.externalApplication,
-      );
+      final ok = await launchUrl(webUri, mode: LaunchMode.externalApplication);
       if (!ok) {
         messenger.showSnackBar(
           const SnackBar(content: Text('Play 스토어를 열 수 없습니다.')),
@@ -317,8 +311,11 @@ class _AppDrawer extends StatelessWidget {
               padding: const EdgeInsets.fromLTRB(20, 16, 20, 6),
               child: Row(
                 children: [
-                  Icon(Icons.apps_rounded,
-                      size: 14, color: Colors.grey.shade500),
+                  Icon(
+                    Icons.apps_rounded,
+                    size: 14,
+                    color: Colors.grey.shade500,
+                  ),
                   const SizedBox(width: 6),
                   Text(
                     '추천 앱',
@@ -347,8 +344,7 @@ class _AppDrawer extends StatelessWidget {
                 size: 16,
                 color: Colors.grey.shade500,
               ),
-              onTap: () =>
-                  _openPlayStore(context, 'com.gyeongryunplus.app'),
+              onTap: () => _openPlayStore(context, 'com.gyeongryunplus.app'),
             ),
             ListTile(
               leading: const Icon(
@@ -419,6 +415,7 @@ class _RaceListTabState extends ConsumerState<_RaceListTab> {
       raceNo: race.raceNo,
     );
     unawaited(ref.read(raceStartListProvider(entryParams).future));
+    unawaited(ref.read(raceHorseStatsProvider(entryParams).future));
     unawaited(ref.read(oddsProvider(entryParams).future));
     unawaited(ref.read(predictionProvider(entryParams).future));
     unawaited(
@@ -466,7 +463,8 @@ class _RaceListTabState extends ConsumerState<_RaceListTab> {
             {};
 
         final now = DateTime.now();
-        final isToday = selectedDate.year == now.year &&
+        final isToday =
+            selectedDate.year == now.year &&
             selectedDate.month == now.month &&
             selectedDate.day == now.day;
 
@@ -606,7 +604,9 @@ class _UpdateButtonState extends State<_UpdateButton>
                 onTap: widget.onTap,
                 child: Container(
                   padding: const EdgeInsets.symmetric(
-                      horizontal: 8, vertical: 4),
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.white.withValues(alpha: 0.04),
                     borderRadius: BorderRadius.circular(8),
@@ -792,9 +792,7 @@ class _GhostIconButton extends StatelessWidget {
             decoration: BoxDecoration(
               color: Colors.white.withValues(alpha: 0.05),
               borderRadius: BorderRadius.circular(10),
-              border: Border.all(
-                color: Colors.white.withValues(alpha: 0.08),
-              ),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
             ),
             child: Icon(
               icon,
@@ -823,9 +821,7 @@ class _MeetTabs extends StatelessWidget {
         return Container(
           decoration: BoxDecoration(
             border: Border(
-              bottom: BorderSide(
-                color: Colors.white.withValues(alpha: 0.06),
-              ),
+              bottom: BorderSide(color: Colors.white.withValues(alpha: 0.06)),
             ),
           ),
           child: Row(
@@ -854,8 +850,9 @@ class _MeetTabs extends StatelessWidget {
                             ? AppTheme.accentGold
                             : Colors.white.withValues(alpha: 0.45),
                         fontSize: 15,
-                        fontWeight:
-                            selected ? FontWeight.w800 : FontWeight.w500,
+                        fontWeight: selected
+                            ? FontWeight.w800
+                            : FontWeight.w500,
                         letterSpacing: -0.2,
                       ),
                       child: Text(labels[i]),
@@ -934,8 +931,7 @@ class _DateSelector extends StatelessWidget {
                   Icon(
                     Icons.calendar_today_rounded,
                     size: 13,
-                    color:
-                        isToday ? AppTheme.accentGold : Colors.grey.shade400,
+                    color: isToday ? AppTheme.accentGold : Colors.grey.shade400,
                   ),
                   const SizedBox(width: 8),
                   Text(
@@ -953,7 +949,9 @@ class _DateSelector extends StatelessWidget {
                     const SizedBox(width: 8),
                     Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 7, vertical: 2),
+                        horizontal: 7,
+                        vertical: 2,
+                      ),
                       decoration: BoxDecoration(
                         color: AppTheme.accentGold.withValues(alpha: 0.28),
                         borderRadius: BorderRadius.circular(8),
@@ -1000,9 +998,7 @@ class _NavCircleButton extends StatelessWidget {
           decoration: BoxDecoration(
             color: Colors.white.withValues(alpha: 0.05),
             shape: BoxShape.circle,
-            border: Border.all(
-              color: Colors.white.withValues(alpha: 0.08),
-            ),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
           ),
           child: Icon(
             icon,

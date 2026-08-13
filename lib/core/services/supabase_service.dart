@@ -1,4 +1,5 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../constants/prediction_constants.dart';
 import '../../models/race.dart';
 import '../../models/race_entry.dart';
 import '../../models/race_result.dart';
@@ -114,6 +115,48 @@ class SupabaseService {
   }
 
   // ── Horse History ──
+
+  Future<Map<String, ({int totalRaces, int winCount, int placeCount})>>
+  getHorseStatsBatch({required Iterable<String> horseNames}) async {
+    final names = horseNames
+        .map((name) => name.trim())
+        .where((name) => name.isNotEmpty)
+        .toSet()
+        .toList();
+    if (names.isEmpty) return const {};
+
+    final data = <Map<String, dynamic>>[];
+    const pageSize = 1000;
+    var offset = 0;
+    while (true) {
+      final page = _normalizeRows(
+        await _client
+            .from('race_results')
+            .select('horse_name,rank')
+            .inFilter('horse_name', names)
+            .gt('rank', 0)
+            .range(offset, offset + pageSize - 1),
+      );
+      data.addAll(page);
+      if (page.length < pageSize) break;
+      offset += pageSize;
+    }
+
+    final totals = <String, ({int totalRaces, int winCount, int placeCount})>{};
+    for (final row in data) {
+      final horseName = row['horse_name']?.toString().trim() ?? '';
+      final rank = (row['rank'] as num?)?.toInt() ?? 0;
+      if (horseName.isEmpty || rank <= 0) continue;
+      final current = totals[horseName];
+      totals[horseName] = (
+        totalRaces: (current?.totalRaces ?? 0) + 1,
+        winCount: (current?.winCount ?? 0) + (rank == 1 ? 1 : 0),
+        placeCount:
+            (current?.placeCount ?? 0) + (rank == 2 || rank == 3 ? 1 : 0),
+      );
+    }
+    return totals;
+  }
 
   Future<List<RaceResult>> getHorseResults({
     required String horseName,
@@ -243,14 +286,7 @@ class SupabaseService {
       byVersion.putIfAbsent(version, () => []).add(row);
     }
 
-    const preferredVersions = [
-      'heuristic-place-1.1',
-      'heuristic-place-1.0',
-      'heuristic-3.1-tuned',
-      'heuristic-3.1',
-      '1.0',
-    ];
-    final selectedVersion = preferredVersions
+    final selectedVersion = PredictionConstants.preferredModelVersions
         .where(byVersion.containsKey)
         .cast<String?>()
         .firstWhere((version) => version != null, orElse: () => null);

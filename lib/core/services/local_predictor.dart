@@ -1,4 +1,5 @@
 import 'dart:math';
+import '../constants/prediction_constants.dart';
 import '../../models/odds.dart';
 import '../../models/prediction.dart';
 import '../../models/race_entry.dart';
@@ -6,8 +7,7 @@ import '../../models/race_entry.dart';
 /// heuristic-3.1: 표본 보정 기반 로컬 예측
 /// 점수 차이를 극대화하여 실제 경마에 가까운 승률 분포를 생성
 class LocalPredictor {
-  /// `heuristic-place-1.2`부터 승률 표시만 완만하게 상향 보정합니다.
-  static const modelVersion = 'heuristic-place-1.2';
+  static const modelVersion = PredictionConstants.modelVersion;
   static const _params = _HeuristicParams(
     wRating: 0.324359,
     wPerformance: 0.371729,
@@ -19,8 +19,7 @@ class LocalPredictor {
     tempScale: 1.595725,
     reliabilityPenalty: 0.174242,
   );
-  static const _wMarket = 0.12;
-  static const _winProbabilityLift = 1.35;
+  static const _wMarket = PredictionConstants.marketWeight;
 
   static PredictionReport generate({
     required String meet,
@@ -94,10 +93,7 @@ class LocalPredictor {
       marketWeight = 0.9;
     }
 
-    // 기초 지표·시장 신호가 모두 없는 상황(예: 신마 데뷔전 + 배당 미발표)에서는
-    // 모든 말의 점수가 동일해져 softmax 가 정확히 1/N 을 출력한다. 이 경우
-    // _winProbabilityLift 를 곱해 부풀리면 사용자 입장에서 "모두 15%" 같이
-    // 오해를 부르므로 lift 를 해제하고 정직하게 1/N 으로 표시한다.
+    // 기초 지표·시장 신호가 모두 없으면 정직하게 1/N 확률을 표시합니다.
     final isUniformDistribution =
         fundamentalSignalAbsent && marketByHorse.length < 2;
 
@@ -205,10 +201,6 @@ class LocalPredictor {
       final entry = entries[i];
       final style = styles[entry.horseNo] ?? '중단';
       final winProb = probabilities[i];
-      final liftFactor = isUniformDistribution ? 1.0 : _winProbabilityLift;
-      final adjustedWinProb = (winProb * liftFactor)
-          .clamp(0.0, 95.0)
-          .toDouble();
       final rank = rankedHorseNos.indexOf(entry.horseNo) + 1;
       final placeProb = _calcPlaceProb(
         winProb: winProb,
@@ -219,7 +211,7 @@ class LocalPredictor {
       final tags = _generateTags(
         entry,
         style,
-        adjustedWinProb,
+        winProb,
         placeProb,
         avgRating,
         pacePressure,
@@ -230,7 +222,7 @@ class LocalPredictor {
           horseNo: entry.horseNo,
           horseName: entry.horseName,
           jockeyName: entry.jockeyName,
-          winProbability: double.parse(adjustedWinProb.toStringAsFixed(1)),
+          winProbability: double.parse(winProb.toStringAsFixed(1)),
           placeProbability: double.parse(placeProb.toStringAsFixed(1)),
           tags: tags,
           featureImportance: featureImportanceByHorseNo[entry.horseNo] ?? {},

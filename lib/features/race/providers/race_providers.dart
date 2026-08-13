@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+import '../../../core/constants/prediction_constants.dart';
 import '../../../core/services/kra_api_service.dart';
 import '../../../core/services/kra_video_service.dart';
 import '../../../core/services/ml_api_service.dart';
@@ -82,15 +83,19 @@ raceStartListProvider =
       ({String meet, String? date, int? raceNo})
     >((ref, params) async {
       if (params.date != null && params.raceNo != null) {
-        final dayEntries = ref
-            .read(
-              raceStartListProvider((
-                meet: params.meet,
-                date: params.date,
-                raceNo: null,
-              )),
-            )
-            .valueOrNull;
+        final dayProvider = raceStartListProvider((
+          meet: params.meet,
+          date: params.date,
+          raceNo: null,
+        ));
+        List<RaceEntry>? dayEntries;
+        if (ref.exists(dayProvider)) {
+          dayEntries = await _withTimeout<List<RaceEntry>>(
+            ref.read(dayProvider.future),
+            const Duration(seconds: 1),
+            const [],
+          );
+        }
         if (dayEntries != null && dayEntries.isNotEmpty) {
           final cachedEntries = dayEntries
               .where((entry) => entry.raceNo == params.raceNo)
@@ -288,118 +293,31 @@ final predictionProvider =
           raceNo: params.raceNo,
         )).future,
       );
-      // odds 는 LocalPredictor 의 시장(배당) 신호에 사용된다. 비어 있으면
-      // 모든 말의 점수가 평탄해져 AI 승률이 거의 같은 값으로 나올 수 있다.
-      // 라이브 배당(Supabase → KRA)이 없으면, 이미 캐시된 경주결과로부터 최종
-      // 배당을 합성한다. (캐시 미스 시에는 무거운 fetch 를 새로 트리거하지 않는다.)
-      Future<List<Odds>> loadOdds() async {
-        final supa = ref.read(supabaseServiceProvider);
-        var odds = await _withTimeout<List<Odds>>(
-          supa.getOdds(
+      // 화면과 같은 provider를 공유해 Supabase/KRA 배당 요청이 두 번 나가지 않게 한다.
+      final oddsFuture = ref.read(
+        oddsProvider((
+          meet: params.meet,
+          date: params.date,
+          raceNo: params.raceNo,
+        )).future,
+      );
+
+      // 1) Supabase — 출주표가 로드되어 정합성이 검증된 경우에만 사용한다.
+      final supa = ref.read(supabaseServiceProvider);
+      try {
+        final report = await _withTimeout<PredictionReport?>(
+          supa.getPredictions(
             meet: params.meet,
             raceDate: params.date,
             raceNo: params.raceNo,
           ),
           const Duration(seconds: 2),
-          const [],
-        );
-        if (odds.isNotEmpty) return odds;
-        final kra = ref.read(kraApiServiceProvider);
-        odds = await _withTimeout<List<Odds>>(
-          kra.getOddInfo(
-            meet: params.meet,
-            rcDate: params.date,
-            rcNo: params.raceNo,
-          ),
-          const Duration(seconds: 3),
-          const [],
-        );
-        if (odds.isNotEmpty) return odds;
-
-        // 라이브 배당이 모두 비어 있는 경우 → 종료된 경주의 결과 최종배당을 합성한다.
-        // 이미 다른 화면에서 raceResultProvider 가 로드된 경우엔 캐시를 즉시 사용해
-        // 추가 비용 없이 시장 신호를 확보한다. 캐시 미스 시에는 짧은 타임아웃으로
-        // 시도하고, 실패하면 빈 배열로 폴백한다.
-        final resultsCached = ref
-            .read(
-              raceResultProvider((
-                meet: params.meet,
-                date: params.date,
-                raceNo: params.raceNo,
-              )),
-            )
-            .valueOrNull;
-        List<RaceResult> results = resultsCached ?? const [];
-        if (results.isEmpty) {
-          try {
-            results = await ref
-                .read(
-                  raceResultProvider((
-                    meet: params.meet,
-                    date: params.date,
-                    raceNo: params.raceNo,
-                  )).future,
-                )
-                .timeout(const Duration(seconds: 4));
-          } catch (_) {}
-        }
-        if (results.isEmpty) return const [];
-
-        final entries = await ref.read(
-          raceStartListProvider((
-            meet: params.meet,
-            date: params.date,
-            raceNo: params.raceNo,
-          )).future,
-        );
-        final nameToHorseNo = <String, int>{
-          for (final e in entries)
-            if (e.horseName.isNotEmpty) e.horseName: e.horseNo,
-        };
-        final synthesized = <Odds>[];
-        for (final r in results) {
-          final hno = nameToHorseNo[r.horseName] ?? r.horseNo;
-          if (hno <= 0) continue;
-          if (r.winOdds > 0) {
-            synthesized.add(
-              Odds(
-                betType: 'WIN',
-                horseNo1: hno,
-                horseNo2: 0,
-                horseNo3: 0,
-                rate: r.winOdds,
-              ),
-            );
-          }
-          if (r.placeOdds > 0) {
-            synthesized.add(
-              Odds(
-                betType: 'PLC',
-                horseNo1: hno,
-                horseNo2: 0,
-                horseNo3: 0,
-                rate: r.placeOdds,
-              ),
-            );
-          }
-        }
-        return synthesized;
-      }
-
-      final oddsFuture = loadOdds();
-
-      // 1) Supabase — 출주표가 로드되어 정합성이 검증된 경우에만 사용한다.
-      final supa = ref.read(supabaseServiceProvider);
-      try {
-        final report = await supa.getPredictions(
-          meet: params.meet,
-          raceDate: params.date,
-          raceNo: params.raceNo,
+          null,
         );
         if (report != null && report.predictions.isNotEmpty) {
           final entries = await entriesFuture;
           if (entries.isNotEmpty &&
-              report.modelVersion == LocalPredictor.modelVersion &&
+              report.modelVersion == PredictionConstants.modelVersion &&
               _isPredictionAligned(report, entries)) {
             return report;
           }
@@ -410,7 +328,24 @@ final predictionProvider =
         }
       } catch (_) {}
 
-      // 2) Local place model from entry data
+      // 2) 학습·검증된 ML 모델. 휴리스틱 응답은 로컬 엔진과 중복되므로 제외한다.
+      try {
+        final entries = await entriesFuture;
+        final mlApi = ref.read(mlApiServiceProvider);
+        final remote = await mlApi.getPrediction(
+          meet: params.meet,
+          date: params.date,
+          raceNo: params.raceNo,
+        );
+        if (remote != null &&
+            remote.predictions.isNotEmpty &&
+            PredictionConstants.isProductionMlVersion(remote.modelVersion) &&
+            (entries.isEmpty || _isPredictionAligned(remote, entries))) {
+          return remote;
+        }
+      } catch (_) {}
+
+      // 3) 원격 모델을 사용할 수 없으면 동일 입력 기반 로컬 모델로 폴백한다.
       try {
         final entries = await entriesFuture;
         if (entries.isNotEmpty) {
@@ -421,26 +356,6 @@ final predictionProvider =
             raceNo: params.raceNo,
             entries: entries,
             odds: odds,
-          );
-        }
-      } catch (_) {}
-
-      // 3) ML Backend fallback only when entry data is unavailable
-      try {
-        final mlApi = ref.read(mlApiServiceProvider);
-        final remote = await mlApi.getPrediction(
-          meet: params.meet,
-          date: params.date,
-          raceNo: params.raceNo,
-        );
-        if (remote != null && remote.predictions.isNotEmpty) {
-          final entries = await entriesFuture;
-          if (entries.isEmpty || _isPredictionAligned(remote, entries)) {
-            return remote;
-          }
-          debugPrint(
-            '[PRED] ML 예측 말 수/마번 불일치: '
-            '${remote.predictions.length}건, 출마표 ${entries.length}두',
           );
         }
       } catch (_) {}
@@ -502,7 +417,7 @@ final raceHorseStatsProvider =
       Map<String, HorseStatsSnapshot>,
       ({String meet, String date, int raceNo})
     >((ref, params) async {
-      final entries = await ref.watch(
+      final entries = await ref.read(
         raceStartListProvider((
           meet: params.meet,
           date: params.date,
@@ -535,23 +450,19 @@ final raceHorseStatsProvider =
       // 2) 출주표에 전적이 비어 있는 말만 Supabase 에서 가볍게 보강한다.
       //    horseResultsProvider 의 12개월 KRA 스캔(최대 25초)은 호출하지 않는다.
       //    상세 전적은 말 상세 화면에서 별도로 로드된다.
-      await Future.wait(
-        entriesNeedingFetch.map((e) async {
-          List<RaceResult> results = const [];
-          try {
-            results = await supa
-                .getHorseResults(horseName: e.horseName)
-                .timeout(const Duration(seconds: 3));
-          } catch (_) {}
-          final ranked = results.where((r) => r.rank > 0).toList();
-          stats[e.horseName] = (
-            totalRaces: ranked.length,
-            winCount: ranked.where((r) => r.rank == 1).length,
-            placeCount:
-                ranked.where((r) => r.rank == 2 || r.rank == 3).length,
-          );
-        }),
-      );
+      Map<String, HorseStatsSnapshot> fetched = const {};
+      try {
+        fetched = await supa
+            .getHorseStatsBatch(
+              horseNames: entriesNeedingFetch.map((entry) => entry.horseName),
+            )
+            .timeout(const Duration(seconds: 3));
+      } catch (_) {}
+      for (final entry in entriesNeedingFetch) {
+        stats[entry.horseName] =
+            fetched[entry.horseName] ??
+            (totalRaces: 0, winCount: 0, placeCount: 0);
+      }
 
       return stats;
     });
