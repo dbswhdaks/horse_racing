@@ -25,7 +25,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   late TabController _tabController;
   final _scaffoldKey = GlobalKey<ScaffoldState>();
   final _meets = ['1', '2', '3'];
-  final _meetLabels = ['서울', '제주', '부산경남'];
+  final _meetLabels = ['서울', '제주', '영남'];
 
   @override
   void initState() {

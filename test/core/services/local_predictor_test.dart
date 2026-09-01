@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:horse_racing/core/constants/prediction_constants.dart';
 import 'package:horse_racing/core/services/local_predictor.dart';
 import 'package:horse_racing/models/race_entry.dart';
 
@@ -42,7 +43,30 @@ void main() {
     );
 
     expect(total, closeTo(100, 0.2));
-    expect(report.modelVersion, 'heuristic-place-1.3');
+    expect(report.modelVersion, PredictionConstants.modelVersion);
+  });
+
+  test('입상 확률 합계는 입상 슬롯 수와 같다', () {
+    final report = LocalPredictor.generate(
+      meet: '1',
+      date: '20260813',
+      raceNo: 3,
+      entries: [
+        _entry(1, 90, 5),
+        _entry(2, 80, 3),
+        _entry(3, 70, 2),
+        _entry(4, 60, 1),
+        _entry(5, 50, 0),
+        _entry(6, 40, 0),
+      ],
+    );
+
+    final total = report.predictions.fold<double>(
+      0,
+      (sum, prediction) => sum + prediction.placeProbability,
+    );
+
+    expect(total, closeTo(PredictionConstants.placeSlots * 100, 1.0));
   });
 
   test('정보가 없는 경주는 균등 확률로 표시된다', () {

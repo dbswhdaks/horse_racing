@@ -3,30 +3,45 @@ import '../constants/prediction_constants.dart';
 import '../../models/odds.dart';
 import '../../models/prediction.dart';
 import '../../models/race_entry.dart';
+import 'entry_features.dart';
 
-/// heuristic-3.1: 표본 보정 기반 로컬 예측
-/// 점수 차이를 극대화하여 실제 경마에 가까운 승률 분포를 생성
+/// 표본 보정 기반 로컬 예측.
+///
+/// 점수 차이를 극대화해 실제 경마에 가까운 승률 분포를 만들고, 입상 확률은
+/// 별도 온도의 분포에서 Harville 공식으로 유도합니다.
+///
+/// 가중치는 `backend/tune_heuristic_predictions.py` 튜닝 결과이며
+/// `backend/export_dart_params.py` 가 자동으로 갱신합니다. 직접 수정하지 마십시오.
 class LocalPredictor {
   static const modelVersion = PredictionConstants.modelVersion;
+  // TUNED_PARAMS_BEGIN
   static const _params = _HeuristicParams(
-    wRating: 0.324359,
-    wPerformance: 0.371729,
-    wClassForm: 0.020350,
-    wPace: 0.005776,
-    wCondition: 0.277786,
+    wRating: 0.253406,
+    wPerformance: 0.290413,
+    wClassForm: 0.015898,
+    wPace: 0.004513,
+    wCondition: 0.217020,
+    wJockey: 0.062500,
+    wRecentForm: 0.093750,
+    wFitness: 0.062500,
     ratingPow: 2.614967,
     priorWeight: 7.375545,
     tempScale: 1.595725,
+    placeTempScale: 1.000000,
     reliabilityPenalty: 0.174242,
   );
+  // TUNED_PARAMS_END
   static const _wMarket = PredictionConstants.marketWeight;
 
+  /// [features] 는 `SupabaseService.getEntryFeaturesBatch` 가 만든 as-of
+  /// 서브스코어입니다. 비어 있으면 중립값이 쓰여 점수에 영향을 주지 않습니다.
   static PredictionReport generate({
     required String meet,
     required String date,
     required int raceNo,
     required List<RaceEntry> entries,
     List<Odds> odds = const [],
+    Map<int, EntryFeatureScores> features = const {},
   }) {
     if (entries.isEmpty) {
       return PredictionReport(
@@ -145,12 +160,18 @@ class LocalPredictor {
         maxHorseWeight,
       );
 
+      // as-of 시계열 피처. 공급되지 않으면 중립값이라 점수에 영향이 없습니다.
+      final entryFeatures = features[entry.horseNo] ?? EntryFeatureScores.neutral;
+
       final base0to1 =
           (ratingScore * _params.wRating) +
           (performanceScore * _params.wPerformance) +
           (classFormScore * _params.wClassForm) +
           (paceScore * _params.wPace) +
-          (conditionScore * _params.wCondition);
+          (conditionScore * _params.wCondition) +
+          (entryFeatures.jockey * _params.wJockey) +
+          (entryFeatures.recentForm * _params.wRecentForm) +
+          (entryFeatures.fitness * _params.wFitness);
 
       final marketComp = marketByHorse[entry.horseNo] ?? 0.5;
       final s = (1.0 - marketWeight).clamp(0.0, 1.0);
@@ -174,6 +195,9 @@ class LocalPredictor {
         'prize': prizeScore * 100,
         'recent_prize': recentPrizeScore * 100,
         'market': marketComp * 100.0,
+        'jockey': entryFeatures.jockey * 100.0,
+        'recent_form': entryFeatures.recentForm * 100.0,
+        'fitness': entryFeatures.fitness * 100.0,
       };
     }
 
@@ -181,32 +205,35 @@ class LocalPredictor {
     final maxRaw = rawScores.reduce(max);
     final minRaw = rawScores.reduce(min);
     final spread = maxRaw - minRaw;
-    final temperature = _calcTemperature(entries.length, spread);
+    final temperature = _calcTemperature(
+      entries.length,
+      spread,
+      _params.tempScale,
+    );
     final expScores = rawScores
         .map((s) => exp((s - maxRaw) / temperature))
         .toList();
     final sumExp = expScores.fold(0.0, (a, b) => a + b);
     final probabilities = expScores.map((e) => (e / sumExp) * 100).toList();
 
-    final rankedHorseNos =
-        List.generate(entries.length, (i) => entries[i].horseNo)..sort((a, b) {
-          final scoreCompare = (scoreByHorseNo[b] ?? 0).compareTo(
-            scoreByHorseNo[a] ?? 0,
-          );
-          if (scoreCompare != 0) return scoreCompare;
-          return a.compareTo(b);
-        });
+    // 입상 확률은 단승과 다른 온도의 분포에서 Harville 공식으로 유도합니다.
+    final placeTemperature = _calcTemperature(
+      entries.length,
+      spread,
+      _params.placeTempScale,
+    );
+    final placeExpScores = rawScores
+        .map((s) => exp((s - maxRaw) / placeTemperature))
+        .toList();
+    final placeProbabilities = harvillePlaceProbs(
+      placeExpScores,
+    ).map((v) => v * 100).toList();
 
     for (int i = 0; i < entries.length; i++) {
       final entry = entries[i];
       final style = styles[entry.horseNo] ?? '중단';
       final winProb = probabilities[i];
-      final rank = rankedHorseNos.indexOf(entry.horseNo) + 1;
-      final placeProb = _calcPlaceProb(
-        winProb: winProb,
-        horseCount: entries.length,
-        rank: rank,
-      );
+      final placeProb = placeProbabilities[i];
 
       final tags = _generateTags(
         entry,
@@ -215,6 +242,7 @@ class LocalPredictor {
         placeProb,
         avgRating,
         pacePressure,
+        entries.length,
       );
 
       predictions.add(
@@ -254,7 +282,11 @@ class LocalPredictor {
     );
   }
 
-  static double _calcTemperature(int horseCount, double spread) {
+  static double _calcTemperature(
+    int horseCount,
+    double spread,
+    double scale,
+  ) {
     final base = horseCount <= 6
         ? 6.8
         : horseCount <= 10
@@ -265,29 +297,68 @@ class LocalPredictor {
         : spread <= 14
         ? 1.0
         : 0.88;
-    return (base * spreadFactor * _params.tempScale)
-        .clamp(5.5, 11.0)
-        .toDouble();
+    return (base * spreadFactor * scale).clamp(5.5, 11.0).toDouble();
   }
 
-  static double _calcPlaceProb({
-    required double winProb,
-    required int horseCount,
-    required int rank,
+  /// Harville 공식으로 단승 확률에서 입상(top-[slots]) 확률을 유도합니다.
+  ///
+  /// 말 i가 2착일 확률은 "j가 1착이고 남은 풀에서 i가 뽑힐 확률"의 합이며,
+  /// 3착도 같은 방식으로 조건부 추출을 한 단계 더 적용합니다. 순서쌍 합을
+  /// 미리 구해 O(n^2)으로 정확히 계산합니다.
+  ///
+  /// [weights]는 정규화되지 않아도 되며, 반환값은 0~1 스케일입니다.
+  /// `backend/tune_heuristic_predictions.py` 의 `_harville_place_probs` 와
+  /// 동일한 결과를 내야 합니다.
+  static List<double> harvillePlaceProbs(
+    List<double> weights, {
+    int slots = PredictionConstants.placeSlots,
   }) {
-    final fieldBoost = horseCount >= 10 ? 8.0 : 5.0;
-    final rankBoost = rank == 1
-        ? 9.0
-        : rank == 2
-        ? 7.0
-        : rank == 3
-        ? 6.0
-        : rank <= 5
-        ? 3.0
-        : 1.0;
-    final placeProb = (winProb * 1.65) + fieldBoost + rankBoost;
-    return placeProb.clamp(winProb + 4, 92).toDouble();
+    final n = weights.length;
+    if (n == 0) return const [];
+    if (n <= slots) return List<double>.filled(n, 1.0);
+
+    final total = weights.fold(0.0, (a, b) => a + b);
+    if (total <= 0) return List<double>.filled(n, slots / n);
+
+    const eps = 1e-9;
+    final p = weights.map((v) => max(v / total, 1e-12)).toList();
+
+    final probs = List<double>.of(p);
+    if (slots <= 1) return probs.map(_clamp01).toList();
+
+    // 2착: P(i 2착) = p_i * (T - p_i/(1-p_i)),  T = sum_j p_j/(1-p_j)
+    final ratio = p.map((v) => v / max(1.0 - v, eps)).toList();
+    final tSum = ratio.fold(0.0, (a, b) => a + b);
+    for (int i = 0; i < n; i++) {
+      probs[i] += p[i] * (tSum - ratio[i]);
+    }
+    if (slots <= 2) return probs.map(_clamp01).toList();
+
+    // 3착: c[j][k] = p_j * (p_k / (1 - p_j)) / (1 - p_j - p_k) 의 순서쌍 합을
+    // 재사용해 P(i 3착) = p_i * (S - rowSum_i - colSum_i) 로 계산합니다.
+    var pairTotal = 0.0;
+    final rowSum = List<double>.filled(n, 0.0);
+    final colSum = List<double>.filled(n, 0.0);
+    for (int j = 0; j < n; j++) {
+      final first = p[j];
+      final rest = max(1.0 - first, eps);
+      for (int k = 0; k < n; k++) {
+        if (k == j) continue;
+        final denom = max(1.0 - first - p[k], eps);
+        final c = first * (p[k] / rest) / denom;
+        pairTotal += c;
+        rowSum[j] += c;
+        colSum[k] += c;
+      }
+    }
+    for (int i = 0; i < n; i++) {
+      probs[i] += p[i] * (pairTotal - rowSum[i] - colSum[i]);
+    }
+
+    return probs.map(_clamp01).toList();
   }
+
+  static double _clamp01(double v) => v.clamp(0.0, 1.0).toDouble();
 
   static Map<int, String> _analyzeRunningStyles(List<RaceEntry> entries) {
     final result = <int, String>{};
@@ -312,6 +383,7 @@ class LocalPredictor {
     double placeProb,
     double avgRating,
     bool pacePressure,
+    int horseCount,
   ) {
     final tags = <String>[];
     if (entry.rating >= avgRating * 1.15) tags.add('고레이팅');
@@ -320,9 +392,15 @@ class LocalPredictor {
     if (entry.totalRaces >= 15) tags.add('경험마');
     if (entry.recentPrize > 300000) tags.add('최근호조');
     if (entry.totalRaces <= 2) tags.add('표본적음');
-    if (placeProb >= 45) {
+
+    // 입상 확률의 기준선은 두수에 따라 달라지므로(무작위 = 슬롯수/두수)
+    // 고정 임계값 대신 기준선 대비 배수로 판정한다.
+    final placeBaseline = horseCount > 0
+        ? (PredictionConstants.placeSlots / horseCount) * 100
+        : 0.0;
+    if (placeBaseline > 0 && placeProb >= placeBaseline * 1.5) {
       tags.add('입상강력');
-    } else if (placeProb >= 35) {
+    } else if (placeBaseline > 0 && placeProb >= placeBaseline * 1.2) {
       tags.add('입상유력');
     }
 
@@ -451,9 +529,13 @@ class _HeuristicParams {
   final double wClassForm;
   final double wPace;
   final double wCondition;
+  final double wJockey;
+  final double wRecentForm;
+  final double wFitness;
   final double ratingPow;
   final double priorWeight;
   final double tempScale;
+  final double placeTempScale;
   final double reliabilityPenalty;
 
   const _HeuristicParams({
@@ -462,9 +544,13 @@ class _HeuristicParams {
     required this.wClassForm,
     required this.wPace,
     required this.wCondition,
+    required this.wJockey,
+    required this.wRecentForm,
+    required this.wFitness,
     required this.ratingPow,
     required this.priorWeight,
     required this.tempScale,
+    required this.placeTempScale,
     required this.reliabilityPenalty,
   });
 }

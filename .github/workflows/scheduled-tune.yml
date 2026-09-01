@@ -1,6 +1,6 @@
-# 주간(또는 수동) 휴리스틱 가중치 튜닝 + JSON 아티팩트
+# 주간(또는 수동) 휴리스틱 가중치 튜닝 + JSON/Dart diff 아티팩트
 # Secrets: SUPABASE_URL, SUPABASE_SERVICE_KEY
-# 결과: Actions → 해당 실행 → Artifacts → heuristic_tuned_params.json 다운로드 → repo에 반영(PR) 가능
+# 결과: Actions → 해당 실행 → Artifacts → heuristic-tuned-params 다운로드 → repo에 반영(PR)
 name: scheduled-tune
 
 on:
@@ -14,10 +14,18 @@ on:
         description: "사용할 최대 경주 수"
         type: string
         default: "2500"
+      folds:
+        description: "walk-forward 검증 블록 수"
+        type: string
+        default: "3"
       sync_predictions:
         description: "튜닝 후 Supabase predictions까지 업서트(1/0)"
         type: string
         default: "1"
+      include_market_odds:
+        description: "사전 배당을 시장 피처로 사용(1/0). audit_dataset 통과 후에만 켜십시오."
+        type: string
+        default: "0"
   schedule:
     # 매주 일요일 UTC 03:00
     - cron: "0 3 * * 0"
@@ -53,6 +61,12 @@ jobs:
       - name: Install dependencies
         run: pip install -r backend/requirements.txt
 
+      - name: Audit dataset before tuning
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python backend/audit_dataset.py --json backend/models/dataset_audit.json
+
       - name: Run heuristic tuning
         working-directory: ${{ github.workspace }}
         env:
@@ -63,21 +77,41 @@ jobs:
           # workflow_dispatch: 입력 / schedule: 기본값
           TRIALS="${{ github.event.inputs.trials }}"
           MAXR="${{ github.event.inputs.max_races }}"
+          FOLDS="${{ github.event.inputs.folds }}"
           SYNC="${{ github.event.inputs.sync_predictions }}"
+          MARKET="${{ github.event.inputs.include_market_odds }}"
           if [ -z "$TRIALS" ] || [ "$TRIALS" = "null" ]; then TRIALS=500; fi
           if [ -z "$MAXR" ] || [ "$MAXR" = "null" ]; then MAXR=2500; fi
+          if [ -z "$FOLDS" ] || [ "$FOLDS" = "null" ]; then FOLDS=3; fi
           if [ -z "$SYNC" ] || [ "$SYNC" = "null" ]; then SYNC=1; fi
-          CMD=(python backend/tune_heuristic_predictions.py --trials "$TRIALS" --max-races "$MAXR" --output backend/models/heuristic_tuned_params.json)
+          if [ -z "$MARKET" ] || [ "$MARKET" = "null" ]; then MARKET=0; fi
+          CMD=(python backend/tune_heuristic_predictions.py
+               --trials "$TRIALS" --max-races "$MAXR" --folds "$FOLDS"
+               --output backend/models/heuristic_tuned_params.json)
           if [ "$SYNC" = "1" ] || [ "$SYNC" = "true" ] || [ "$SYNC" = "yes" ]; then
-            CMD+=("--sync-predictions" "--model-version" "heuristic-place-1.3")
+            CMD+=("--sync-predictions")
+          fi
+          if [ "$MARKET" = "1" ] || [ "$MARKET" = "true" ] || [ "$MARKET" = "yes" ]; then
+            CMD+=("--include-market-odds")
           fi
           echo "Running: ${CMD[*]}"
           "${CMD[@]}"
 
-      - name: Upload tuning JSON
+      - name: Sync tuned params into Dart constants
+        run: python backend/export_dart_params.py
+
+      - name: Show Dart diff
+        if: always()
+        run: git --no-pager diff -- lib backend/models || true
+
+      - name: Upload tuning artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: heuristic-tuned-params
-          path: backend/models/heuristic_tuned_params.json
+          path: |
+            backend/models/heuristic_tuned_params.json
+            backend/models/dataset_audit.json
+            lib/core/services/local_predictor.dart
+            lib/core/constants/prediction_constants.dart
           if-no-files-found: warn

@@ -9,6 +9,8 @@ on:
   schedule:
     # UTC 01:00 ≈ KST 10:00
     - cron: "0 1 * * *"
+    # 시행일(금·토·일) 발주 전 배당 스냅샷. UTC 00:00/03:00 ≈ KST 09:00/12:00
+    - cron: "0 0,3 * * 5,6,0"
 
 # Node.js 20 deprecation 경고 회피: 가능 시 Node.js 24 로 액션 실행.
 env:
@@ -43,6 +45,20 @@ jobs:
       - name: Install dependencies
         run: pip install -r backend/requirements.txt
 
+      # 발주 전 스냅샷은 당일 경주만 대상으로 하며, 이후 실행이 사후 확정
+      # 배당으로 덮어쓰지 않도록 ops_sync 가 기존 사전 배당을 보존한다.
+      - name: Capture pre-race odds snapshot
+        working-directory: ${{ github.workspace }}
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          KRA_SERVICE_KEY: ${{ secrets.KRA_SERVICE_KEY }}
+        run: |
+          set -e
+          TODAY=$(TZ=Asia/Seoul date +%Y%m%d)
+          echo "TODAY(KST)=$TODAY"
+          python backend/ops_sync.py odds --on "$TODAY" --max-races 0 --sleep 0.35
+
       - name: Sync odds and predictions
         working-directory: ${{ github.workspace }}
         env:
@@ -54,4 +70,15 @@ jobs:
           SINCE=$(date -d "90 days ago" +%Y%m%d)
           echo "SINCE=$SINCE"
           python backend/ops_sync.py odds --since "$SINCE" --max-races 400 --sleep 0.35
-          python backend/ops_sync.py predictions --since "$SINCE" --max-races 2500 --model-version heuristic-place-1.3
+          python backend/ops_sync.py predictions --since "$SINCE" --max-races 2500 --include-unfinished
+
+      # 결과가 확정된 경주에 대해 실제로 노출됐던 예측의 적중률을 기록한다.
+      - name: Record prediction accuracy
+        working-directory: ${{ github.workspace }}
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: |
+          set -e
+          SINCE=$(date -d "90 days ago" +%Y%m%d)
+          python backend/ops_sync.py accuracy --since "$SINCE"

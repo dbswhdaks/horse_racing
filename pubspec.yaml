@@ -2,11 +2,11 @@
 name: horse_racing
 description: "경마 예측 앱 - 한국마사회 공공데이터 기반"
 publish_to: 'none' # pub.dev에 배포하지 않음 (비공개 앱)
-version: 1.0.30+30
+version: 1.0.37+37
 
 # Flutter SDK 버전 제약
 environment:
-  sdk: ^3.9.0
+  sdk: ^3.10.0                  # in_app_purchase 3.3.0 (Play Billing 8.x) 요구사항
 
 # 런타임 의존성 패키지
 dependencies:
@@ -26,7 +26,7 @@ dependencies:
   google_fonts: ^6.2.1          # 구글 폰트 적용
   supabase_flutter: ^2.8.0      # Supabase 백엔드 연동 (DB, Auth)
   share_plus: ^12.0.1           # 외부 공유 기능
-  in_app_purchase: ^3.2.3
+  in_app_purchase: ^3.3.0        # Google Play Billing Library 8.x 지원 (in_app_purchase_android 0.5.x)
   url_launcher: ^6.3.2
   webview_flutter: ^4.13.1
   shared_preferences: ^2.5.5

@@ -355,6 +355,14 @@ class RaceEntryScreen extends ConsumerWidget {
         final predictionsByPlace = [...predictions]
           ..sort(Prediction.compareByPlaceThenWin);
 
+        // 종합추천 순위는 AI 예측과 배당을 모두 반영해 산출한다. 둘 중 하나라도
+        // 아직 도착하지 않은 상태로 그리면 번호가 두세 번 튀므로, 첫 로딩이
+        // 끝날 때까지 자리만 잡아 둔다. (갱신 중에는 hasValue 가 유지되므로
+        // 자동 새로고침 때 다시 스켈레톤으로 되돌아가지 않는다.)
+        final recommendationReady =
+            (predAsync.hasValue || predAsync.hasError) &&
+            (oddsAsync.hasValue || oddsAsync.hasError);
+
         // 결과 페이지의 horseNo(=gtno)는 실제 게이트 번호다.
         // 결과가 있으면 이름 기반으로 게이트 매핑을 갱신한다.
         final gateMap = _buildGateMapWithResults(entries, results);
@@ -391,6 +399,12 @@ class RaceEntryScreen extends ConsumerWidget {
             SliverToBoxAdapter(
               child: () {
                 if (entries.isEmpty) return const SizedBox.shrink();
+                if (!recommendationReady) {
+                  return const Padding(
+                    padding: EdgeInsets.fromLTRB(12, 4, 12, 4),
+                    child: ShimmerLoading(height: 300),
+                  );
+                }
                 return _ComprehensiveRecommendation(
                   raceKey: '${meet}_${date}_$raceNo',
                   entries: entries,
@@ -408,6 +422,14 @@ class RaceEntryScreen extends ConsumerWidget {
                 if (entries.isEmpty) return const SizedBox.shrink();
                 if (!canViewPacePreview) {
                   return const SizedBox.shrink();
+                }
+                // 결승 구간 순위가 종합추천과 같은 입력에서 나오므로
+                // 준비 상태도 함께 맞춰 둘이 어긋나 보이지 않게 한다.
+                if (!recommendationReady) {
+                  return const Padding(
+                    padding: EdgeInsets.fromLTRB(12, 4, 12, 4),
+                    child: ShimmerLoading(height: 220),
+                  );
                 }
                 return _RacePacePreview(
                   entries: entries,
@@ -502,6 +524,7 @@ class RaceEntryScreen extends ConsumerWidget {
                   prediction: pred,
                   predictionRank: predRank,
                   distance: distance,
+                  raceGrade: race?.gradeCondition ?? '',
                   stats: statsMap[entry.horseName],
                   statsLoading: statsLoading,
                   onTap: () => context.push(
@@ -2061,7 +2084,7 @@ class _HorsePaceData {
 // 종합 추천
 // ═══════════════════════════════════════════════════
 
-class _ComprehensiveRecommendation extends StatelessWidget {
+class _ComprehensiveRecommendation extends StatefulWidget {
   final String raceKey;
   final List<RaceEntry> entries;
   final List<Prediction> predictions;
@@ -2078,17 +2101,72 @@ class _ComprehensiveRecommendation extends StatelessWidget {
     required this.gateByHorseNo,
   });
 
+  @override
+  State<_ComprehensiveRecommendation> createState() =>
+      _ComprehensiveRecommendationState();
+}
+
+class _ComprehensiveRecommendationState
+    extends State<_ComprehensiveRecommendation> {
+  /// 상위 3두 산출은 순위 정렬을 여러 번 하므로 build 마다 다시 하지 않고,
+  /// 결과에 실제로 영향을 주는 입력이 바뀔 때만 다시 계산한다.
+  List<_HorseRecommendation> _recommendations = const [];
+  String? _inputSignature;
+
+  @override
+  void initState() {
+    super.initState();
+    _refresh();
+  }
+
+  @override
+  void didUpdateWidget(covariant _ComprehensiveRecommendation old) {
+    super.didUpdateWidget(old);
+    _refresh();
+  }
+
+  /// 계산 결과를 바꿀 수 있는 값만 모은 지문. 부모가 매 build 마다 새 리스트를
+  /// 만들어 넘기므로 참조 비교로는 변경을 판별할 수 없다.
+  String _signatureOf(_ComprehensiveRecommendation w) {
+    final buffer = StringBuffer(w.raceKey)..write('|${w.distance}|');
+    for (final e in w.entries) {
+      buffer.write(
+        '${e.horseNo}:${e.rating}:${e.winCount}:${e.placeCount}'
+        ':${e.totalRaces}:${e.weight}:${e.horseWeight};',
+      );
+    }
+    buffer.write('|');
+    for (final p in w.predictions) {
+      buffer.write('${p.horseNo}:${p.winProbability}:${p.placeProbability};');
+    }
+    buffer.write('|');
+    for (final o in w.odds) {
+      if (o.betType == 'WIN' || o.betType == '1') {
+        buffer.write('${o.horseNo1}:${o.rate};');
+      }
+    }
+    return buffer.toString();
+  }
+
+  void _refresh() {
+    final signature = _signatureOf(widget);
+    if (signature == _inputSignature) return;
+    _inputSignature = signature;
+    _recommendations = _analyzeAndRecommend();
+    _saveRecommendations(_recommendations);
+  }
+
   Future<void> _saveRecommendations(List<_HorseRecommendation> recs) async {
+    if (recs.isEmpty) return;
     final prefs = await SharedPreferences.getInstance();
     final top5 = recs.take(5).map((r) => r.horseNo.toString()).toList();
-    await prefs.setStringList('comp_$raceKey', top5);
+    await prefs.setStringList('comp_${widget.raceKey}', top5);
   }
 
   @override
   Widget build(BuildContext context) {
-    final recommendations = _analyzeAndRecommend();
+    final recommendations = _recommendations;
     if (recommendations.isEmpty) return const SizedBox.shrink();
-    _saveRecommendations(recommendations);
 
     return Container(
       margin: const EdgeInsets.fromLTRB(12, 4, 12, 4),
@@ -2199,7 +2277,7 @@ class _ComprehensiveRecommendation extends StatelessWidget {
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: Text(
-                          '${gateByHorseNo[rec.horseNo] ?? rec.horseNo}번',
+                          '${widget.gateByHorseNo[rec.horseNo] ?? rec.horseNo}번',
                           style: TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.w900,
@@ -2343,14 +2421,14 @@ class _ComprehensiveRecommendation extends StatelessWidget {
   }
 
   List<_HorseRecommendation> _analyzeAndRecommend() {
-    if (entries.isEmpty) return const [];
+    if (widget.entries.isEmpty) return const [];
 
     // ─── 1) 보조 데이터 준비 ───
     final predMap = <int, Prediction>{
-      for (final p in predictions) p.horseNo: p,
+      for (final p in widget.predictions) p.horseNo: p,
     };
     final oddsMap = <int, double>{};
-    for (final o in odds) {
+    for (final o in widget.odds) {
       if ((o.betType == 'WIN' || o.betType == '1') && o.rate > 0) {
         oddsMap[o.horseNo1] = o.rate;
       }
@@ -2369,16 +2447,16 @@ class _ComprehensiveRecommendation extends StatelessWidget {
       return set.length > 1;
     }
 
-    final ratingHasInfo = hasVariance(entries.map((e) => e.rating));
-    final racesHasInfo = entries.any((e) => e.totalRaces > 0);
-    final aiHasInfo = hasVariance(entries.map(aiPlace));
+    final ratingHasInfo = hasVariance(widget.entries.map((e) => e.rating));
+    final racesHasInfo = widget.entries.any((e) => e.totalRaces > 0);
+    final aiHasInfo = hasVariance(widget.entries.map(aiPlace));
     final oddsHasInfo = oddsMap.length >= 2;
 
     // ─── 2) 전개 분석 (기존 로직 유지) ───
     final runningStyles = <int, String>{};
     final frontRunners = <int>[];
     final closers = <int>[];
-    for (final entry in entries) {
+    for (final entry in widget.entries) {
       final pred = predMap[entry.horseNo];
       final style = _getRunningStyle(entry, pred);
       runningStyles[entry.horseNo] = style;
@@ -2390,17 +2468,27 @@ class _ComprehensiveRecommendation extends StatelessWidget {
     }
     final isFrontHeavy =
         frontRunners.length >= 4 ||
-        (frontRunners.length >= 3 && entries.length <= 10);
+        (frontRunners.length >= 3 && widget.entries.length <= 10);
     final isCloserFavored = closers.length >= 3 && frontRunners.length <= 2;
 
     // ─── 3) 랭크 기반 점수 헬퍼 ───
     // 상위(=signal 값이 클수록)일수록 maxPts, 하위일수록 maxPts*0.2 를 부여한다.
+    // signal 을 비교마다 호출하면 내부에서 또 순위를 매기는 paceSignal 에서
+    // 비용이 제곱으로 커지므로, 값을 먼저 구해 두고 정렬한다.
+    // 동점은 마번으로 갈라 같은 데이터에서 항상 같은 순서가 나오게 한다.
+    List<RaceEntry> sortedBySignal(double Function(RaceEntry) signal) {
+      final values = {for (final e in widget.entries) e.horseNo: signal(e)};
+      return [...widget.entries]..sort((a, b) {
+        final diff = (values[b.horseNo] ?? 0).compareTo(values[a.horseNo] ?? 0);
+        return diff != 0 ? diff : a.horseNo.compareTo(b.horseNo);
+      });
+    }
+
     Map<int, double> rankPoints(
       double Function(RaceEntry) signal,
       double maxPts,
     ) {
-      final sorted = [...entries]
-        ..sort((a, b) => signal(b).compareTo(signal(a)));
+      final sorted = sortedBySignal(signal);
       final result = <int, double>{};
       final n = sorted.length;
       for (var i = 0; i < n; i++) {
@@ -2411,10 +2499,15 @@ class _ComprehensiveRecommendation extends StatelessWidget {
       return result;
     }
 
-    int rankOf(double Function(RaceEntry) signal, RaceEntry target) {
-      final sorted = [...entries]
-        ..sort((a, b) => signal(b).compareTo(signal(a)));
-      return sorted.indexWhere((e) => e.horseNo == target.horseNo) + 1;
+    final rankCache = <String, Map<int, int>>{};
+    int rankOf(String key, double Function(RaceEntry) signal, RaceEntry target) {
+      final ranks = rankCache.putIfAbsent(key, () {
+        final sorted = sortedBySignal(signal);
+        return {
+          for (var i = 0; i < sorted.length; i++) sorted[i].horseNo: i + 1,
+        };
+      });
+      return ranks[target.horseNo] ?? 0;
     }
 
     // ─── 4) 컴포넌트별 점수 산정 ───
@@ -2482,8 +2575,8 @@ class _ComprehensiveRecommendation extends StatelessWidget {
       }
       // 레이팅 상위는 어떤 전개에서도 약간 가산
       if (ratingHasInfo) {
-        final rRank = rankOf((x) => x.rating, e);
-        base += (entries.length - rRank) * 0.5;
+        final rRank = rankOf('rating', (x) => x.rating, e);
+        base += (widget.entries.length - rRank) * 0.5;
       }
       return base;
     }
@@ -2497,7 +2590,7 @@ class _ComprehensiveRecommendation extends StatelessWidget {
 
       // 레이팅 관련
       if (ratingHasInfo) {
-        final r = rankOf((x) => x.rating, e);
+        final r = rankOf('rating', (x) => x.rating, e);
         if (r <= 2 && e.rating > 0) {
           reasons.add('레이팅 $r위 (${e.rating.toStringAsFixed(0)})');
         } else if (r <= 3 && e.rating > 0) {
@@ -2522,7 +2615,7 @@ class _ComprehensiveRecommendation extends StatelessWidget {
 
       // AI 관련
       if (pred != null && pred.placeProbability > 0) {
-        final r = rankOf(aiPlace, e);
+        final r = rankOf('aiPlace', aiPlace, e);
         if (r == 1) {
           reasons.add('AI 입상 1순위 예측');
         } else if (r <= 3) {
@@ -2533,7 +2626,7 @@ class _ComprehensiveRecommendation extends StatelessWidget {
       // 배당 관련
       final wo = winOddsOf(e);
       if (wo > 0) {
-        final r = rankOf(marketProb, e);
+        final r = rankOf('marketProb', marketProb, e);
         if (r == 1) {
           reasons.add('1번 인기 (${wo.toStringAsFixed(1)}배)');
         } else if (r <= 3) {
@@ -2563,7 +2656,7 @@ class _ComprehensiveRecommendation extends StatelessWidget {
 
     // ─── 6) 결과 합산 ───
     final recs = <_HorseRecommendation>[];
-    for (final e in entries) {
+    for (final e in widget.entries) {
       final rs = ratingPts[e.horseNo] ?? 0;
       final ps = perfPts[e.horseNo] ?? 0;
       final js = aiOddsPts[e.horseNo] ?? 0;
@@ -2915,6 +3008,9 @@ class _HorseCard extends StatelessWidget {
   final Prediction? prediction;
   final int predictionRank;
   final int distance;
+
+  /// 출주표에 등급이 비어 있을 때 사용할 경주 단위 등급.
+  final String raceGrade;
   final HorseStatsSnapshot? stats;
   final bool statsLoading;
   final VoidCallback onTap;
@@ -2926,10 +3022,15 @@ class _HorseCard extends StatelessWidget {
     this.prediction,
     this.predictionRank = 0,
     this.distance = 0,
+    this.raceGrade = '',
     this.stats,
     this.statsLoading = false,
     required this.onTap,
   });
+
+  /// '국6등급' 처럼 접미사가 붙은 표기를 좁은 스탯 칸에 맞게 줄인다.
+  static String _shortGrade(String grade) =>
+      grade.replaceAll('등급', '').trim();
 
   @override
   Widget build(BuildContext context) {
@@ -2949,6 +3050,11 @@ class _HorseCard extends StatelessWidget {
     final placeRate = totalRaces > 0
         ? (winCount + placeCount) / totalRaces * 100
         : 0.0;
+
+    // KRA 는 R0~0 조건(신마·미승리급) 경주에 레이팅을 부여하지 않는다.
+    // 그때는 빈 값 대신 등급을 보여 준다.
+    final hasRating = entry.rating > 0;
+    final gradeLabel = entry.grade.isNotEmpty ? entry.grade : raceGrade;
 
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
@@ -3077,10 +3183,12 @@ class _HorseCard extends StatelessWidget {
                 child: Row(
                   children: [
                     _StatColumn(
-                      label: '레이팅',
-                      value: entry.rating > 0
+                      label: hasRating ? '레이팅' : '등급',
+                      value: hasRating
                           ? entry.rating.toStringAsFixed(0)
-                          : '-',
+                          : (gradeLabel.isNotEmpty
+                                ? _shortGrade(gradeLabel)
+                                : '-'),
                       color: Colors.cyanAccent,
                     ),
                     _statDivider(),

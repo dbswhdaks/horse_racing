@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../../../core/constants/prediction_constants.dart';
+import '../../../core/services/entry_features.dart';
 import '../../../core/services/kra_api_service.dart';
 import '../../../core/services/kra_video_service.dart';
 import '../../../core/services/ml_api_service.dart';
@@ -350,17 +351,66 @@ final predictionProvider =
         final entries = await entriesFuture;
         if (entries.isNotEmpty) {
           final odds = await oddsFuture;
+          final features = await ref.read(
+            entryFeaturesProvider((
+              meet: params.meet,
+              date: params.date,
+              raceNo: params.raceNo,
+            )).future,
+          );
           return LocalPredictor.generate(
             meet: params.meet,
             date: params.date,
             raceNo: params.raceNo,
             entries: entries,
             odds: odds,
+            features: features,
           );
         }
       } catch (_) {}
 
       return null;
+    });
+
+// ── As-of 피처: race_results 과거 이력 기반 서브스코어 ──
+
+final entryFeaturesProvider =
+    FutureProvider.family<
+      Map<int, EntryFeatureScores>,
+      ({String meet, String date, int raceNo})
+    >((ref, params) async {
+      final entries = await ref.read(
+        raceStartListProvider((
+          meet: params.meet,
+          date: params.date,
+          raceNo: params.raceNo,
+        )).future,
+      );
+      if (entries.isEmpty) return const {};
+
+      final races = await _withTimeout<List<Race>>(
+        ref.read(
+          racePlanProvider((meet: params.meet, date: params.date)).future,
+        ),
+        const Duration(seconds: 2),
+        const [],
+      );
+      final distance = races
+          .where((race) => race.raceNo == params.raceNo)
+          .map((race) => race.distance)
+          .firstOrNull;
+
+      // 조회에 실패하면 빈 맵을 돌려 LocalPredictor 가 중립값으로 동작하게 한다.
+      final supa = ref.read(supabaseServiceProvider);
+      return _withTimeout<Map<int, EntryFeatureScores>>(
+        supa.getEntryFeaturesBatch(
+          raceDate: params.date,
+          distance: distance ?? 0,
+          entries: entries,
+        ),
+        const Duration(seconds: 4),
+        const {},
+      );
     });
 
 String _normalizeHorseName(String raw) {

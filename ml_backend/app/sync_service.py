@@ -181,18 +181,33 @@ def sync_all(meet: str, date_str: str, delay: float = 0.3):
     return {"races": n_races, "entries": n_entries, "results": n_results}
 
 
+# 국내 경마는 금·토·일에만 시행되므로 기본 백필은 해당 요일만 조회합니다.
+# (datetime.weekday(): 월=0 … 금=4, 토=5, 일=6)
+DEFAULT_RACE_WEEKDAYS = (4, 5, 6)
+
+
 def sync_date_range(
     meet: str,
     start_date: str,
     end_date: str,
     delay: float = 0.5,
+    weekdays: tuple[int, ...] | None = DEFAULT_RACE_WEEKDAYS,
 ):
-    """지정 기간의 모든 데이터를 동기화합니다."""
+    """지정 기간의 모든 데이터를 동기화합니다.
+
+    `weekdays` 를 None으로 주면 모든 날짜를 조회합니다.
+    """
     current = datetime.strptime(start_date, "%Y%m%d")
     end = datetime.strptime(end_date, "%Y%m%d")
     total = {"races": 0, "entries": 0, "results": 0}
+    skipped = 0
 
     while current <= end:
+        if weekdays is not None and current.weekday() not in weekdays:
+            skipped += 1
+            current += timedelta(days=1)
+            continue
+
         date_str = current.strftime("%Y%m%d")
         result = sync_all(meet, date_str, delay=0.3)
         for k in total:
@@ -200,7 +215,7 @@ def sync_date_range(
         time.sleep(delay)
         current += timedelta(days=1)
 
-    print(f"\n[SYNC] 전체 기간 완료: {total}")
+    print(f"\n[SYNC] 전체 기간 완료: {total} (비시행 요일 {skipped}일 생략)")
     return total
 
 
@@ -212,12 +227,22 @@ if __name__ == "__main__":
     parser.add_argument("--date", default=None, help="특정 일자 (YYYYMMDD)")
     parser.add_argument("--start", default=None, help="시작일 (YYYYMMDD)")
     parser.add_argument("--end", default=None, help="종료일 (YYYYMMDD)")
+    parser.add_argument(
+        "--all-weekdays",
+        action="store_true",
+        help="금·토·일 필터를 끄고 기간 내 모든 날짜를 조회",
+    )
     args = parser.parse_args()
 
     if args.date:
         sync_all(args.meet, args.date)
     elif args.start and args.end:
-        sync_date_range(args.meet, args.start, args.end)
+        sync_date_range(
+            args.meet,
+            args.start,
+            args.end,
+            weekdays=None if args.all_weekdays else DEFAULT_RACE_WEEKDAYS,
+        )
     else:
         today = datetime.now().strftime("%Y%m%d")
         sync_all(args.meet, today)

@@ -1,3 +1,5 @@
+# 기간을 6개월 단위로 쪼개 (경마장 x 구간) 매트릭스로 병렬 백필한 뒤 데이터 감사를 실행합니다.
+# Secrets: KRA_SERVICE_KEY, SUPABASE_URL, SUPABASE_SERVICE_KEY
 name: historical-backfill
 
 on:
@@ -16,11 +18,82 @@ on:
         required: true
         default: "1 2 3"
         type: string
+      all_weekdays:
+        description: "금·토·일 필터를 끄고 모든 날짜 조회(1/0)"
+        required: false
+        default: "0"
+        type: string
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.build.outputs.matrix }}
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - id: build
+        name: Split date range into 6-month chunks
+        env:
+          START: ${{ inputs.start }}
+          END: ${{ inputs.end }}
+          MEETS: ${{ inputs.meets }}
+        run: |
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, os
+          from datetime import date, timedelta
+
+          def parse(s):
+              s = s.strip()
+              return date(int(s[:4]), int(s[4:6]), int(s[6:8]))
+
+          def add_months(d, n):
+              month = d.month - 1 + n
+              year = d.year + month // 12
+              month = month % 12 + 1
+              day = min(d.day, [31, 29 if year % 4 == 0 and (year % 100 != 0 or year % 400 == 0) else 28,
+                                31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1])
+              return date(year, month, day)
+
+          start, end = parse(os.environ["START"]), parse(os.environ["END"])
+          if start > end:
+              raise SystemExit("start 가 end 보다 늦습니다.")
+
+          meets = [m for m in os.environ["MEETS"].split() if m]
+          if not meets:
+              raise SystemExit("meets 가 비어 있습니다.")
+
+          include = []
+          for meet in meets:
+              cursor = start
+              while cursor <= end:
+                  chunk_end = min(add_months(cursor, 6) - timedelta(days=1), end)
+                  include.append({
+                      "meet": meet,
+                      "start": cursor.strftime("%Y%m%d"),
+                      "end": chunk_end.strftime("%Y%m%d"),
+                  })
+                  cursor = chunk_end + timedelta(days=1)
+
+          if len(include) > 256:
+              raise SystemExit(f"매트릭스 작업이 {len(include)}개로 GitHub 상한(256)을 넘습니다. 기간을 줄이십시오.")
+
+          print("matrix=" + json.dumps({"include": include}))
+          PY
+
   backfill:
+    needs: plan
     runs-on: ubuntu-latest
     timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      # KRA 공공 API 부하를 고려해 동시 실행 수를 제한합니다.
+      max-parallel: 3
+      matrix: ${{ fromJson(needs.plan.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -39,9 +112,34 @@ jobs:
           test -n "$KRA_SERVICE_KEY"
           test -n "$SUPABASE_URL"
           test -n "$SUPABASE_SERVICE_KEY"
-          for meet in ${{ inputs.meets }}; do
-            python -m app.sync_service \
-              --meet "$meet" \
-              --start "${{ inputs.start }}" \
-              --end "${{ inputs.end }}"
-          done
+          EXTRA=()
+          if [ "${{ inputs.all_weekdays }}" = "1" ]; then EXTRA+=("--all-weekdays"); fi
+          python -m app.sync_service \
+            --meet "${{ matrix.meet }}" \
+            --start "${{ matrix.start }}" \
+            --end "${{ matrix.end }}" \
+            "${EXTRA[@]}"
+
+  audit:
+    needs: backfill
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install -r backend/requirements.txt
+      - name: Audit dataset coverage
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python backend/audit_dataset.py --json backend/models/dataset_audit.json
+      - name: Upload audit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dataset-audit
+          path: backend/models/dataset_audit.json
+          if-no-files-found: warn

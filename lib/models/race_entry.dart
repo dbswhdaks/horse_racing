@@ -11,6 +11,10 @@ class RaceEntry {
   final String ownerName;
   final double weight;
   final double rating;
+
+  /// 경주 등급(예: 국6등급). KRA 는 R0~0 조건의 하위 등급 경주에 레이팅을
+  /// 부여하지 않으므로, 그 경우 화면에서 레이팅 대신 보여 준다.
+  final String grade;
   final int totalPrize;
   final int recentPrize;
   final int winCount;
@@ -31,6 +35,7 @@ class RaceEntry {
     required this.ownerName,
     required this.weight,
     required this.rating,
+    this.grade = '',
     required this.totalPrize,
     required this.recentPrize,
     required this.winCount,
@@ -77,6 +82,7 @@ class RaceEntry {
             json['rtPt'] ??
             json['ratingScore'],
       ),
+      grade: _str(json['rank'] ?? json['grdCond'] ?? json['rcRank'] ?? ''),
       totalPrize: _toInt(
         json['chaksunT'] ??
             json['totalPrz'] ??
@@ -133,6 +139,7 @@ class RaceEntry {
     String? ownerName,
     double? weight,
     double? rating,
+    String? grade,
     int? totalPrize,
     int? recentPrize,
     int? winCount,
@@ -153,6 +160,7 @@ class RaceEntry {
       ownerName: ownerName ?? this.ownerName,
       weight: weight ?? this.weight,
       rating: rating ?? this.rating,
+      grade: grade ?? this.grade,
       totalPrize: totalPrize ?? this.totalPrize,
       recentPrize: recentPrize ?? this.recentPrize,
       winCount: winCount ?? this.winCount,

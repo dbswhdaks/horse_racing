@@ -97,7 +97,7 @@ class PredictionScreen extends ConsumerWidget {
                                   _WinProbabilityChart(
                                     predictions: report.predictions,
                                   ),
-                                  const _SectionTitle('복승(입상) 예측'),
+                                  const _SectionTitle('입상(3착 이내) 확률'),
                                   _PlaceProbabilityChart(
                                     predictions: report.predictions,
                                   ),
@@ -524,7 +524,7 @@ class _PredictionDetailCard extends StatelessWidget {
                       ),
                     ),
                     Text(
-                      '복 ${prediction.placeProbability.toStringAsFixed(1)}%',
+                      '입상 ${prediction.placeProbability.toStringAsFixed(1)}%',
                       style: TextStyle(
                         fontSize: 12,
                         color: Colors.grey.shade400,
