@@ -18,6 +18,36 @@ def _clean_name(name: str) -> str:
     return re.sub(r"\([^)]*\)", "", name).strip()
 
 
+_month_plan_cache: dict[tuple[str, str], list[dict]] = {}
+
+
+def month_race_plan(meet: str, month: str) -> list[dict]:
+    """월 단위 경주 일정. 같은 (경마장, 월) 은 한 번만 조회합니다.
+
+    경주가 없는 날짜마다 월 조회를 반복하면 응답이 느린 경마장에서 백필이
+    타임아웃 대기로만 수십 분씩 소모됩니다.
+    """
+    key = (meet, month)
+    if key not in _month_plan_cache:
+        _month_plan_cache[key] = _get_json("/API72_2/racePlan_2", {
+            "meet": meet,
+            "rc_month": month,
+        })
+    return _month_plan_cache[key]
+
+
+def has_scheduled_race(meet: str, date_str: str) -> bool:
+    """해당 일자에 편성이 있는지 월 일정으로 판단합니다.
+
+    월 일정 조회 자체가 비어 있으면 판단 근거가 없으므로 True 를 돌려주어
+    기존처럼 일자별로 모두 조회하게 둡니다.
+    """
+    month_plan = month_race_plan(meet, date_str[:6])
+    if not month_plan:
+        return True
+    return any(str(i.get("rcDate", "")) == date_str for i in month_plan)
+
+
 def sync_race_plan(meet: str, date_str: str):
     """API72_2에서 경주 일정을 가져와 Supabase races 테이블에 저장합니다."""
     items = _get_json("/API72_2/racePlan_2", {
@@ -25,11 +55,11 @@ def sync_race_plan(meet: str, date_str: str):
         "rc_date": date_str,
     })
     if not items:
-        items = _get_json("/API72_2/racePlan_2", {
-            "meet": meet,
-            "rc_month": date_str[:6],
-        })
-        items = [i for i in items if str(i.get("rcDate", "")) == date_str]
+        items = [
+            i
+            for i in month_race_plan(meet, date_str[:6])
+            if str(i.get("rcDate", "")) == date_str
+        ]
 
     if not items:
         print(f"[SYNC] 경주일정 없음: meet={meet}, date={date_str}")
@@ -201,6 +231,7 @@ def sync_date_range(
     end = datetime.strptime(end_date, "%Y%m%d")
     total = {"races": 0, "entries": 0, "results": 0}
     skipped = 0
+    unscheduled = 0
 
     while current <= end:
         if weekdays is not None and current.weekday() not in weekdays:
@@ -209,13 +240,23 @@ def sync_date_range(
             continue
 
         date_str = current.strftime("%Y%m%d")
+        # 월 일정에 없는 날짜는 출전표·결과까지 조회해봐야 모두 빈 응답이다.
+        if not has_scheduled_race(meet, date_str):
+            print(f"[SYNC] 편성 없음, 건너뜀: meet={meet}, date={date_str}")
+            unscheduled += 1
+            current += timedelta(days=1)
+            continue
+
         result = sync_all(meet, date_str, delay=0.3)
         for k in total:
             total[k] += result[k]
         time.sleep(delay)
         current += timedelta(days=1)
 
-    print(f"\n[SYNC] 전체 기간 완료: {total} (비시행 요일 {skipped}일 생략)")
+    print(
+        f"\n[SYNC] 전체 기간 완료: {total} "
+        f"(비시행 요일 {skipped}일, 편성 없음 {unscheduled}일 생략)"
+    )
     return total
 
 
