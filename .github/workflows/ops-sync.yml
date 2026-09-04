@@ -1,5 +1,5 @@
-# KRA → Supabase 배당 백필 + 누출 없는 휴리스틱 predictions 동기화
-# (주간 휴리스틱 튜닝: `scheduled-tune.yml`)
+# KRA → Supabase 경주 일정/배당 동기화 + 누출 없는 휴리스틱 predictions 동기화
+# (주간 휴리스틱 튜닝: `scheduled-tune.yml`, 장기 구간 백필: `historical-backfill.yml`)
 # GitHub: Settings → Secrets and variables → Actions 에 다음을 등록하세요.
 #   SUPABASE_URL, SUPABASE_SERVICE_KEY, KRA_SERVICE_KEY
 name: ops-sync
@@ -13,7 +13,45 @@ on:
     - cron: "0 0,3 * * 5,6,0"
 
 jobs:
+  # 이후 모든 단계가 `races` 테이블을 기준으로 대상 경주를 고른다. 이 잡이 없으면
+  # 일정이 갱신되지 않아 배당·예측이 조용히 0건으로 통과한다.
+  races:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: ml_backend/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r ml_backend/requirements.txt
+
+      # 최근 결과 확정분과 다가오는 편성을 함께 담도록 앞뒤로 여유를 둔다.
+      # sync_service 는 금·토·일만 조회하고, KRA 응답이 없으면 건너뛴다.
+      - name: Sync recent race plan, entries and results
+        working-directory: ml_backend
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          KRA_SERVICE_KEY: ${{ secrets.KRA_SERVICE_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_SERVICE_KEY" ] || [ -z "$KRA_SERVICE_KEY" ]; then
+            echo "::error::필수 secret 누락 — Settings → Secrets and variables → Actions 에서 등록하세요."
+            exit 1
+          fi
+          START=$(TZ=Asia/Seoul date -d "7 days ago" +%Y%m%d)
+          END=$(TZ=Asia/Seoul date -d "7 days" +%Y%m%d)
+          echo "START=$START END=$END"
+          for MEET in 1 2 3; do
+            python -m app.sync_service --meet "$MEET" --start "$START" --end "$END"
+          done
+
   sync:
+    needs: races
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
