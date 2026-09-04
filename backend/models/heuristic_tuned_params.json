@@ -1,7 +1,7 @@
 {
   "generated_at": "2026-09-01T00:00:00",
-  "status": "baseline-pending-retune",
-  "note": "heuristic-place-1.4 구조 변경(Harville 입상확률, as-of 피처 3종, 입상 중심 목적함수) 직후의 기준 파라미터입니다. metrics 는 아직 측정되지 않았으므로 scheduled-tune 워크플로를 실행해 실제 튜닝 결과로 덮어써야 합니다.",
+  "status": "place-specialist-1.5",
+  "note": "heuristic-place-1.5 는 입상 확률을 단승 점수 Harville 이 아니라 입상 전용 점수(연대율·최근폼·기수)에서 유도합니다. scheduled-tune 으로 재탐색하면 place_specialist_mix / place_rating_pow 도 함께 맞춰집니다.",
   "filters": {
     "meet": null,
     "since": null,
@@ -38,6 +38,8 @@
     "prior_weight": 7.375545,
     "temp_scale": 1.595725,
     "place_temp_scale": 1.0,
+    "place_specialist_mix": 0.74,
+    "place_rating_pow": 1.45,
     "reliability_penalty": 0.174242
   },
   "previous_tuning": {

@@ -8,12 +8,28 @@ import 'entry_features.dart';
 /// 표본 보정 기반 로컬 예측.
 ///
 /// 점수 차이를 극대화해 실제 경마에 가까운 승률 분포를 만들고, 입상 확률은
-/// 별도 온도의 분포에서 Harville 공식으로 유도합니다.
+/// 단승과 다른 입상 전용 점수에서 Harville 공식으로 유도합니다.
 ///
 /// 가중치는 `backend/tune_heuristic_predictions.py` 튜닝 결과이며
 /// `backend/export_dart_params.py` 가 자동으로 갱신합니다. 직접 수정하지 마십시오.
 class LocalPredictor {
   static const modelVersion = PredictionConstants.modelVersion;
+
+  /// 입상 전용 성적 믹스. 파이썬 `_PLACE_PERF_*` 와 같아야 합니다.
+  static const _placePerfPlace = 0.62;
+  static const _placePerfConsistency = 0.28;
+  static const _placePerfWin = 0.10;
+
+  /// 입상 전용 가중합. 파이썬 `_PLACE_SPEC_*` 와 같아야 합니다.
+  static const _placeSpecRating = 0.10;
+  static const _placeSpecPerf = 0.40;
+  static const _placeSpecClass = 0.04;
+  static const _placeSpecPace = 0.03;
+  static const _placeSpecCondition = 0.06;
+  static const _placeSpecJockey = 0.12;
+  static const _placeSpecForm = 0.16;
+  static const _placeSpecFitness = 0.09;
+
   // TUNED_PARAMS_BEGIN
   static const _params = _HeuristicParams(
     wRating: 0.253406,
@@ -28,6 +44,8 @@ class LocalPredictor {
     priorWeight: 7.375545,
     tempScale: 1.595725,
     placeTempScale: 1.000000,
+    placeSpecialistMix: 0.740000,
+    placeRatingPow: 1.450000,
     reliabilityPenalty: 0.174242,
   );
   // TUNED_PARAMS_END
@@ -86,6 +104,7 @@ class LocalPredictor {
     final pacePressure = frontCount >= 4;
 
     final rawScores = <double>[];
+    final placeRawScores = <double>[];
     final scoreByHorseNo = <int, double>{};
     final featureImportanceByHorseNo = <int, Map<String, double>>{};
 
@@ -131,6 +150,10 @@ class LocalPredictor {
           ((smoothWinRate.clamp(0, 40) / 40) * 0.48) +
           ((smoothPlaceRate.clamp(0, 75) / 75) * 0.42) +
           ((consistency.clamp(0, 35) / 35) * 0.10);
+      final placePerformanceScore =
+          ((smoothPlaceRate.clamp(0, 75) / 75) * _placePerfPlace) +
+          ((consistency.clamp(0, 35) / 35) * _placePerfConsistency) +
+          ((smoothWinRate.clamp(0, 40) / 40) * _placePerfWin);
 
       final prizeLog = log(max(entry.totalPrize.toDouble(), 0) + 1);
       final minPrizeLog = log(max(minPrize, 0) + 1);
@@ -175,18 +198,39 @@ class LocalPredictor {
 
       final marketComp = marketByHorse[entry.horseNo] ?? 0.5;
       final s = (1.0 - marketWeight).clamp(0.0, 1.0);
-      final scaledBase = base0to1 * s;
+      final ratingScorePlace = pow(
+        ratingNorm,
+        _params.placeRatingPow,
+      ).toDouble();
+      final placeSpecialist =
+          (ratingScorePlace * _placeSpecRating) +
+          (placePerformanceScore * _placeSpecPerf) +
+          (classFormScore * _placeSpecClass) +
+          (paceScore * _placeSpecPace) +
+          (conditionScore * _placeSpecCondition) +
+          (entryFeatures.jockey * _placeSpecJockey) +
+          (entryFeatures.recentForm * _placeSpecForm) +
+          (entryFeatures.fitness * _placeSpecFitness);
+      final mix = _params.placeSpecialistMix.clamp(0.0, 1.0);
+      final placeBase0to1 = ((1.0 - mix) * base0to1) + (mix * placeSpecialist);
+
       final blended0to1 = marketWeight > 0
-          ? (scaledBase + (marketComp * marketWeight))
+          ? ((base0to1 * s) + (marketComp * marketWeight))
           : base0to1;
+      final placeBlended0to1 = marketWeight > 0
+          ? ((placeBase0to1 * s) + (marketComp * marketWeight))
+          : placeBase0to1;
       double score = blended0to1 * 100.0;
+      double placeScore = placeBlended0to1 * 100.0;
 
       final reliability = _sampleReliability(entry.totalRaces);
       final reliabilityScale =
           1 - ((1 - reliability) * _params.reliabilityPenalty);
       score = (score * reliabilityScale).clamp(1, 120).toDouble();
+      placeScore = (placeScore * reliabilityScale).clamp(1, 120).toDouble();
 
       rawScores.add(score);
+      placeRawScores.add(placeScore);
       scoreByHorseNo[entry.horseNo] = score;
       featureImportanceByHorseNo[entry.horseNo] = {
         'rating': ratingScore * 100,
@@ -216,14 +260,17 @@ class LocalPredictor {
     final sumExp = expScores.fold(0.0, (a, b) => a + b);
     final probabilities = expScores.map((e) => (e / sumExp) * 100).toList();
 
-    // 입상 확률은 단승과 다른 온도의 분포에서 Harville 공식으로 유도합니다.
+    // 입상 확률은 단승과 다른 점수·온도의 분포에서 Harville 공식으로 유도합니다.
+    final maxPlaceRaw = placeRawScores.reduce(max);
+    final minPlaceRaw = placeRawScores.reduce(min);
+    final placeSpread = maxPlaceRaw - minPlaceRaw;
     final placeTemperature = _calcTemperature(
       entries.length,
-      spread,
+      placeSpread,
       _params.placeTempScale,
     );
-    final placeExpScores = rawScores
-        .map((s) => exp((s - maxRaw) / placeTemperature))
+    final placeExpScores = placeRawScores
+        .map((s) => exp((s - maxPlaceRaw) / placeTemperature))
         .toList();
     final placeProbabilities = harvillePlaceProbs(
       placeExpScores,
@@ -536,6 +583,8 @@ class _HeuristicParams {
   final double priorWeight;
   final double tempScale;
   final double placeTempScale;
+  final double placeSpecialistMix;
+  final double placeRatingPow;
   final double reliabilityPenalty;
 
   const _HeuristicParams({
@@ -551,6 +600,8 @@ class _HeuristicParams {
     required this.priorWeight,
     required this.tempScale,
     required this.placeTempScale,
+    required this.placeSpecialistMix,
+    required this.placeRatingPow,
     required this.reliabilityPenalty,
   });
 }

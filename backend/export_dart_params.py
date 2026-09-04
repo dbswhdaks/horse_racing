@@ -49,6 +49,8 @@ FIELD_MAP: list[tuple[str, str]] = [
     ("prior_weight", "priorWeight"),
     ("temp_scale", "tempScale"),
     ("place_temp_scale", "placeTempScale"),
+    ("place_specialist_mix", "placeSpecialistMix"),
+    ("place_rating_pow", "placeRatingPow"),
     ("reliability_penalty", "reliabilityPenalty"),
 ]
 

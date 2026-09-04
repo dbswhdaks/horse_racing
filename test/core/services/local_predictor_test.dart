@@ -1,9 +1,16 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:horse_racing/core/constants/prediction_constants.dart';
 import 'package:horse_racing/core/services/local_predictor.dart';
+import 'package:horse_racing/models/prediction.dart';
 import 'package:horse_racing/models/race_entry.dart';
 
-RaceEntry _entry(int horseNo, double rating, int wins) => RaceEntry(
+RaceEntry _entry(
+  int horseNo,
+  double rating,
+  int wins, {
+  int? places,
+  int totalRaces = 10,
+}) => RaceEntry(
   horseNo: horseNo,
   horseName: '말$horseNo',
   birthPlace: '한',
@@ -17,8 +24,8 @@ RaceEntry _entry(int horseNo, double rating, int wins) => RaceEntry(
   totalPrize: wins * 100000,
   recentPrize: wins * 10000,
   winCount: wins,
-  placeCount: wins,
-  totalRaces: 10,
+  placeCount: places ?? wins,
+  totalRaces: totalRaces,
   horseWeight: 470 + horseNo.toDouble(),
 );
 
@@ -90,5 +97,39 @@ void main() {
     for (final prediction in report.predictions) {
       expect(prediction.winProbability, 20);
     }
+  });
+
+  test('안정 입상마는 단승보다 입상 순위에서 앞선다', () {
+    final report = LocalPredictor.generate(
+      meet: '1',
+      date: '20260904',
+      raceNo: 5,
+      entries: [
+        _entry(1, 92, 6, places: 0),
+        _entry(2, 68, 0, places: 8).copyWith(
+          totalPrize: 420000,
+          recentPrize: 90000,
+        ),
+        _entry(3, 86, 4, places: 0),
+        _entry(4, 82, 3, places: 1),
+        _entry(5, 60, 1, places: 0),
+        _entry(6, 50, 0, places: 0),
+      ],
+    );
+
+    final byWin = [...report.predictions]..sort(Prediction.compareByWinThenPlace);
+    final byPlace = [...report.predictions]
+      ..sort(Prediction.compareByPlaceThenWin);
+
+    final winRankOf = {
+      for (var i = 0; i < byWin.length; i++) byWin[i].horseNo: i,
+    };
+    final placeRankOf = {
+      for (var i = 0; i < byPlace.length; i++) byPlace[i].horseNo: i,
+    };
+
+    expect(winRankOf[1]!, lessThan(winRankOf[2]!));
+    expect(placeRankOf[2]!, lessThan(winRankOf[2]!));
+    expect(placeRankOf[2]!, lessThan(3));
   });
 }

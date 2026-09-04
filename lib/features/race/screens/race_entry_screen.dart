@@ -2408,7 +2408,7 @@ class _ComprehensiveRecommendationState
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    '레이팅, 최근 성적, 기수 승률, 거리 적성, 예상 전개를 종합 분석한 결과입니다',
+                    '입상률, 최근 폼, AI 입상확률, 거리 적성, 예상 전개를 종합 분석한 결과입니다',
                     style: TextStyle(fontSize: 10, color: Colors.grey.shade500),
                   ),
                 ),
@@ -2513,36 +2513,38 @@ class _ComprehensiveRecommendationState
     // ─── 4) 컴포넌트별 점수 산정 ───
     // (a) 레이팅: 1순위 rating, 대체 신호로 AI 우승확률
     double ratingSignal(RaceEntry e) => ratingHasInfo ? e.rating : aiWin(e);
-    final ratingPts = rankPoints(ratingSignal, 25);
+    final ratingPts = rankPoints(ratingSignal, 18);
 
-    // (b) 성적: 승률·입상률·경험. 데이터 없으면 AI 입상확률
+    // (b) 성적: 입상률을 승률보다 크게 반영. 데이터 없으면 AI 입상확률
     double perfSignal(RaceEntry e) {
       if (racesHasInfo && e.totalRaces > 0) {
-        return e.winRate * 1.2 + e.placeRate * 0.6 + e.totalRaces * 0.4;
+        return e.placeRate * 1.45 +
+            e.winRate * 0.40 +
+            e.totalRaces.clamp(0, 20) * 0.25;
       }
       return aiPlace(e);
     }
 
-    final perfPts = rankPoints(perfSignal, 25);
+    final perfPts = rankPoints(perfSignal, 30);
 
     // (c) AI/배당 (기존 '기수' 자리): AI 입상확률 + 시장확률 가중평균
     double aiOddsSignal(RaceEntry e) {
       final ap = aiPlace(e);
       final mp = marketProb(e);
-      if (oddsHasInfo && aiHasInfo) return ap * 0.6 + mp * 0.4;
+      if (oddsHasInfo && aiHasInfo) return ap * 0.72 + mp * 0.28;
       if (oddsHasInfo) return mp;
       if (aiHasInfo) return ap;
       return e.rating; // 둘 다 없으면 rating 으로 폴백
     }
 
-    final aiOddsPts = rankPoints(aiOddsSignal, 20);
+    final aiOddsPts = rankPoints(aiOddsSignal, 24);
 
-    // (d) 거리: 출주 경험·승수. 없으면 부담중량(주행 능력 추정) → AI 우승확률
+    // (d) 거리: 입상 경험을 승수보다 크게 반영
     double distSignal(RaceEntry e) {
       if (racesHasInfo && e.totalRaces > 0) {
-        return e.winCount * 6 + e.placeCount * 3 + e.totalRaces * 0.5;
+        return e.placeCount * 5 + e.winCount * 2 + e.totalRaces * 0.4;
       }
-      return aiWin(e);
+      return aiPlace(e);
     }
 
     final distPts = rankPoints(distSignal, 15);
@@ -2581,7 +2583,7 @@ class _ComprehensiveRecommendationState
       return base;
     }
 
-    final pacePts = rankPoints(paceSignal, 15);
+    final pacePts = rankPoints(paceSignal, 13);
 
     // ─── 5) 사유(reason) 빌더 ───
     List<String> buildReasons(RaceEntry e) {

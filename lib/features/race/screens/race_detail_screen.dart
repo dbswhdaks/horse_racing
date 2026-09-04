@@ -1281,13 +1281,16 @@ List<_Candidate> _buildRanked(
     final predScore = pred?.winProbability ?? 0;
     final placeScore = pred?.placeProbability ?? 0;
     final oddsScore = winOdds > 0 ? (100 / winOdds).clamp(0, 100) : 0.0;
-    final formScore = e.rating > 0
+    final formScore = e.placeRate > 0
+        ? (e.placeRate * 0.65 + (e.rating > 0 ? e.rating.clamp(0, 100) : e.winRate * 2.0) * 0.35)
+            .clamp(0, 100)
+        : e.rating > 0
         ? e.rating.clamp(0, 100)
         : (e.winRate * 2.3).clamp(0, 100);
-    // 종합출주: 입상(3위권) 위주 — 승률 가중 ↓, 입상 가중 ↑
+    // 종합출주: 입상(3위권) 위주 — 단승 가중 ↓, 입상 가중 ↑
     final score =
-        predScore * 0.22 +
-        placeScore * 0.48 +
+        predScore * 0.16 +
+        placeScore * 0.54 +
         oddsScore * 0.15 +
         formScore * 0.15;
     return _Candidate(entry: e, score: score);

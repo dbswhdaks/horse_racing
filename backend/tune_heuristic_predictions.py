@@ -2,6 +2,8 @@
 
 실제 경주 결과(race_results)와 출마표(race_entries)를 대조하여
 입상권(Top3) 포함률을 최우선 목표로 가중치를 탐색합니다.
+입상 확률은 단승 점수가 아니라 연대율·최근폼·기수 중심의 입상 전용
+점수에서 Harville 공식으로 유도합니다.
 
 탐색은 시간순 walk-forward 교차검증의 평균 목적함수로 이뤄지고,
 마지막 구간은 홀드아웃으로 남겨 탐색에 전혀 쓰지 않습니다.
@@ -46,6 +48,21 @@ HOLDOUT_RATIO = 0.15
 # 입상권으로 인정하는 착순 범위.
 PLACE_SLOTS = 3
 
+# 입상 전용 성적 믹스. Dart LocalPredictor 와 같아야 합니다.
+_PLACE_PERF_PLACE = 0.62
+_PLACE_PERF_CONSISTENCY = 0.28
+_PLACE_PERF_WIN = 0.10
+
+# 입상 전용 가중합. Dart LocalPredictor 와 같아야 합니다.
+_PLACE_SPEC_RATING = 0.10
+_PLACE_SPEC_PERF = 0.40
+_PLACE_SPEC_CLASS = 0.04
+_PLACE_SPEC_PACE = 0.03
+_PLACE_SPEC_CONDITION = 0.06
+_PLACE_SPEC_JOCKEY = 0.12
+_PLACE_SPEC_FORM = 0.16
+_PLACE_SPEC_FITNESS = 0.09
+
 
 @dataclass
 class HeuristicParams:
@@ -62,6 +79,8 @@ class HeuristicParams:
     prior_weight: float
     temp_scale: float
     place_temp_scale: float
+    place_specialist_mix: float
+    place_rating_pow: float
     reliability_penalty: float
 
     def to_dict(self) -> dict[str, float]:
@@ -79,6 +98,8 @@ class HeuristicParams:
             "prior_weight": round(self.prior_weight, 6),
             "temp_scale": round(self.temp_scale, 6),
             "place_temp_scale": round(self.place_temp_scale, 6),
+            "place_specialist_mix": round(self.place_specialist_mix, 6),
+            "place_rating_pow": round(self.place_rating_pow, 6),
             "reliability_penalty": round(self.reliability_penalty, 6),
         }
 
@@ -544,6 +565,7 @@ def _race_probabilities(
     pace_pressure = front_count >= 4
 
     raw_scores: list[float] = []
+    place_raw_scores: list[float] = []
     horse_nos: list[int] = []
     entry_horse_nos = {_safe_int(e.get("horse_no", 0)) for e in entries if _safe_int(e.get("horse_no", 0)) > 0}
     market_by = _market_implied_by_win_odds(win_odds or {}, entry_horse_nos)
@@ -564,8 +586,8 @@ def _race_probabilities(
         wr = win_rates[idx]
         pr = place_rates[idx]
 
-        rating_comp = _normalize(_safe_float(e.get("rating", 0)), min_rating, max_rating)
-        rating_comp = pow(rating_comp, params.rating_pow)
+        rating_norm = _normalize(_safe_float(e.get("rating", 0)), min_rating, max_rating)
+        rating_comp = pow(rating_norm, params.rating_pow)
 
         samples = float(total_races)
         smooth_wr = ((wr * samples) + (avg_wr * params.prior_weight)) / (samples + params.prior_weight)
@@ -575,6 +597,11 @@ def _race_probabilities(
             (_normalize(smooth_wr, 0, 40) * 0.48)
             + (_normalize(smooth_pr, 0, 75) * 0.42)
             + (_normalize(consistency, 0, 35) * 0.10)
+        )
+        place_perf_comp = (
+            (_normalize(smooth_pr, 0, 75) * _PLACE_PERF_PLACE)
+            + (_normalize(consistency, 0, 35) * _PLACE_PERF_CONSISTENCY)
+            + (_normalize(smooth_wr, 0, 40) * _PLACE_PERF_WIN)
         )
 
         prize_log = math.log(max(_safe_float(e.get("total_prize", 0)), 0.0) + 1.0)
@@ -603,7 +630,7 @@ def _race_probabilities(
         fitness_comp = _safe_float(e.get(FITNESS_FEATURE_KEY, NEUTRAL_SCORE), NEUTRAL_SCORE)
 
         s = 1.0 - market_w
-        base_score = s * (
+        unscaled_base = (
             params.w_rating * rating_comp
             + params.w_perf * perf_comp
             + params.w_class_form * class_comp
@@ -613,16 +640,34 @@ def _race_probabilities(
             + params.w_recent_form * form_comp
             + params.w_fitness * fitness_comp
         )
+        base_score = s * unscaled_base
 
         market_comp = market_by.get(horse_no, 0.5)
+        rating_comp_place = pow(rating_norm, params.place_rating_pow)
+        place_specialist = (
+            rating_comp_place * _PLACE_SPEC_RATING
+            + place_perf_comp * _PLACE_SPEC_PERF
+            + class_comp * _PLACE_SPEC_CLASS
+            + pace_comp * _PLACE_SPEC_PACE
+            + condition_comp * _PLACE_SPEC_CONDITION
+            + jockey_comp * _PLACE_SPEC_JOCKEY
+            + form_comp * _PLACE_SPEC_FORM
+            + fitness_comp * _PLACE_SPEC_FITNESS
+        )
+        mix = max(0.0, min(1.0, params.place_specialist_mix))
+        place_unscaled = ((1.0 - mix) * unscaled_base) + (mix * place_specialist)
+
         if market_w > 0.0:
             blended = base_score + (market_comp * market_w)
+            place_blended = (place_unscaled * s) + (market_comp * market_w)
         else:
-            blended = base_score
+            blended = unscaled_base
+            place_blended = place_unscaled
 
         reliability = _sample_reliability(total_races)
         reliability_factor = 1.0 - (params.reliability_penalty * (1.0 - reliability))
         raw_scores.append(max(1e-6, blended * reliability_factor * 100.0))
+        place_raw_scores.append(max(1e-6, place_blended * reliability_factor * 100.0))
 
     max_raw = max(raw_scores)
     min_raw = min(raw_scores)
@@ -633,9 +678,12 @@ def _race_probabilities(
     total_exp = sum(exps)
     probs = [(v / total_exp) * 100.0 for v in exps]
 
-    # 입상 확률은 단승과 다른 온도의 분포에서 Harville 공식으로 유도합니다.
-    place_temp = _temperature(len(entries), spread, params.place_temp_scale)
-    place_exps = [math.exp((s - max_raw) / place_temp) for s in raw_scores]
+    # 입상 확률은 단승과 다른 점수·온도의 분포에서 Harville 공식으로 유도합니다.
+    max_place_raw = max(place_raw_scores)
+    min_place_raw = min(place_raw_scores)
+    place_spread = max_place_raw - min_place_raw
+    place_temp = _temperature(len(entries), place_spread, params.place_temp_scale)
+    place_exps = [math.exp((s - max_place_raw) / place_temp) for s in place_raw_scores]
     place_probs = [
         v * 100.0 for v in _harville_place_probs(place_exps, slots=PLACE_SLOTS)
     ]
@@ -838,6 +886,8 @@ def _normalize_weights(params: HeuristicParams) -> HeuristicParams:
         prior_weight=params.prior_weight,
         temp_scale=params.temp_scale,
         place_temp_scale=params.place_temp_scale,
+        place_specialist_mix=params.place_specialist_mix,
+        place_rating_pow=params.place_rating_pow,
         reliability_penalty=params.reliability_penalty,
     )
 
@@ -864,6 +914,10 @@ def heuristic_params_from_dict(
                 d.get("place_temp_scale", d.get("temp_scale", 1.0)),
                 1.0,
             ),
+            place_specialist_mix=_safe_float(
+                d.get("place_specialist_mix", 0.74), 0.74
+            ),
+            place_rating_pow=_safe_float(d.get("place_rating_pow", 1.45), 1.45),
             reliability_penalty=_safe_float(
                 d.get("reliability_penalty", 0.15), 0.15
             ),
@@ -895,6 +949,8 @@ def _mutate(
         prior_weight=n(base.prior_weight, 2.5, 2.0, 18.0),
         temp_scale=n(base.temp_scale, 0.20, 0.75, 1.35),
         place_temp_scale=n(base.place_temp_scale, 0.25, 0.60, 2.20),
+        place_specialist_mix=n(base.place_specialist_mix, 0.12, 0.20, 0.90),
+        place_rating_pow=n(base.place_rating_pow, 0.20, 0.90, 2.20),
         reliability_penalty=n(base.reliability_penalty, 0.07, 0.02, 0.35),
     )
     return _normalize_weights(mutated)
@@ -1009,6 +1065,8 @@ def main() -> None:
             prior_weight=7.375545,
             temp_scale=1.595725,
             place_temp_scale=1.000000,
+            place_specialist_mix=0.740000,
+            place_rating_pow=1.450000,
             reliability_penalty=0.174242,
         )
     )
