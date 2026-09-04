@@ -29,11 +29,20 @@ def _get_json(path: str, params: dict) -> list[dict]:
         print(f"[ERROR] {path} → {e}")
         return []
 
-    body = data.get("response", {}).get("body", {})
-    items = body.get("items", {}).get("item", [])
-    if isinstance(items, dict):
-        items = [items]
-    return items if isinstance(items, list) else []
+    # 결과가 없는 날짜에는 body 나 items 가 딕셔너리가 아니라 빈 문자열로 온다.
+    if not isinstance(data, dict):
+        return []
+    body = data.get("response", {}).get("body")
+    if not isinstance(body, dict):
+        return []
+    items = body.get("items")
+    if not isinstance(items, dict):
+        return []
+
+    item = items.get("item")
+    if isinstance(item, dict):
+        return [item]
+    return item if isinstance(item, list) else []
 
 
 def fetch_race_results(meet: str, date_str: str) -> list[dict]:
