@@ -132,7 +132,9 @@ CREATE POLICY "Public read prediction accuracy"
   ON prediction_accuracy FOR SELECT USING (true);
 
 -- 일자·모델별 요약. 앱이나 대시보드에서 추세를 볼 때 사용합니다.
-CREATE OR REPLACE VIEW prediction_accuracy_daily AS
+-- security_invoker 로 두어야 뷰가 조회자의 RLS 를 그대로 따릅니다.
+CREATE OR REPLACE VIEW prediction_accuracy_daily
+WITH (security_invoker = true) AS
 SELECT
   race_date,
   meet,
