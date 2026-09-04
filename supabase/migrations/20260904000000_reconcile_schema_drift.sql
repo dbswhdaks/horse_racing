@@ -148,9 +148,24 @@ GROUP BY race_date, meet, model_version;
 -- =========================================================
 -- RLS: 쓰기는 service_role(RLS 우회) 로만
 -- =========================================================
+--
+-- 아래 정책들은 모두 `public` 롤에 조건 `true` 로 걸려 있어, anon 키만 있으면
+-- 누구나 경주 데이터와 예측을 고치거나 지울 수 있는 상태였습니다.
+-- 앱(`lib/`)은 Supabase 에 쓰기를 하지 않으므로 제거해도 영향이 없습니다.
 
 DROP POLICY IF EXISTS "Service insert races" ON races;
 DROP POLICY IF EXISTS "Service insert entries" ON race_entries;
 DROP POLICY IF EXISTS "Service insert results" ON race_results;
 DROP POLICY IF EXISTS "Service insert predictions" ON predictions;
 DROP POLICY IF EXISTS "Service insert odds" ON odds;
+
+DROP POLICY IF EXISTS "Service update races" ON races;
+DROP POLICY IF EXISTS "Service update entries" ON race_entries;
+DROP POLICY IF EXISTS "Service update results" ON race_results;
+DROP POLICY IF EXISTS "Service update predictions" ON predictions;
+DROP POLICY IF EXISTS "Service update odds" ON odds;
+
+-- 이름과 달리 service_role 이 아니라 public 롤 대상이라 사실상 전체 공개 쓰기입니다.
+DROP POLICY IF EXISTS "Allow all for service_role" ON races;
+DROP POLICY IF EXISTS "Allow all for service_role" ON race_entries;
+DROP POLICY IF EXISTS "Allow all for service_role" ON predictions;
