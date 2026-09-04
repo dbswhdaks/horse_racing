@@ -10,8 +10,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 180
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
@@ -28,7 +28,7 @@ jobs:
           python -m app.supabase_dataset --since 20240101
           python -m app.trainer --splits 5
       - name: Upload versioned model bundle
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: horse-racing-ml-models-${{ github.run_id }}
           path: |

@@ -1,0 +1,54 @@
+# Supabase 마이그레이션 수동 적용
+#
+# GitHub: Settings → Secrets and variables → Actions 에 다음을 등록하세요.
+#   SUPABASE_DB_URL — Supabase 대시보드 → Project Settings → Database →
+#                     Connection string → URI (비밀번호 포함)
+#
+# 이 저장소는 마이그레이션 이력을 추적하지 않으므로 파일을 하나씩 지정해 적용합니다.
+# 재실행해도 안전한(idempotent) 파일만 대상으로 하십시오.
+name: db-migrate
+
+on:
+  workflow_dispatch:
+    inputs:
+      file:
+        description: "적용할 마이그레이션 파일 경로"
+        required: true
+        default: supabase/migrations/20260904000000_reconcile_schema_drift.sql
+        type: string
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Apply migration
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          MIGRATION_FILE: ${{ inputs.file }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "$SUPABASE_DB_URL" ]; then
+            echo "::error::SUPABASE_DB_URL secret 이 없습니다 — Settings → Secrets and variables → Actions 에서 등록하세요."
+            exit 1
+          fi
+
+          case "$MIGRATION_FILE" in
+            *..*|*' '*)
+              echo "::error::잘못된 경로입니다: $MIGRATION_FILE"
+              exit 1
+              ;;
+            supabase/migrations/*.sql) ;;
+            *)
+              echo "::error::supabase/migrations 아래의 .sql 파일만 적용할 수 있습니다."
+              exit 1
+              ;;
+          esac
+
+          echo "적용: $MIGRATION_FILE"
+          psql "$SUPABASE_DB_URL" \
+            --set ON_ERROR_STOP=1 \
+            --single-transaction \
+            --file "$MIGRATION_FILE"
