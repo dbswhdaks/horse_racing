@@ -217,8 +217,11 @@ class _AiTab extends StatelessWidget {
         }
 
         final sorted = [...report.predictions]
-          ..sort(Prediction.compareByWinThenPlace);
+          ..sort(Prediction.compareByPlaceThenWin);
         final top3 = sorted.take(3).toList();
+        final winTop3 = ([
+          ...report.predictions,
+        ]..sort(Prediction.compareByWinThenPlace)).take(3).toList();
         final confidence = _confidence(sorted);
 
         return ListView(
@@ -227,13 +230,13 @@ class _AiTab extends StatelessWidget {
             _AiHeaderCard(
               title: '$meetName ${raceNo}R AI 예측',
               confidence: confidence,
-              topProb: top3.first.winProbability,
+              topProb: top3.first.placeProbability,
             ),
             const SizedBox(height: 16),
             _SectionHeader(
               icon: Icons.emoji_events_rounded,
               iconColor: AppTheme.winColor,
-              title: 'AI 추천(승률순)',
+              title: 'AI 추천(입상확률순)',
               trailing: _ResultButton(
                 onTap: () => context.push('/result/$meet/$date/$raceNo'),
               ),
@@ -253,7 +256,7 @@ class _AiTab extends StatelessWidget {
               );
             }),
             const SizedBox(height: 16),
-            _BettingSection(top3: top3),
+            _BettingSection(top3: winTop3),
             const SizedBox(height: 16),
             _AnalysisSection(top3: top3),
             const SizedBox(height: 16),
@@ -266,7 +269,7 @@ class _AiTab extends StatelessWidget {
 
   int _confidence(List<Prediction> sorted) {
     if (sorted.length < 2) return 70;
-    final gap = sorted[0].winProbability - sorted[1].winProbability;
+    final gap = sorted[0].placeProbability - sorted[1].placeProbability;
     return (55 + gap * 2.2).clamp(50, 92).round();
   }
 }
@@ -691,7 +694,7 @@ class _AiRankCard extends StatelessWidget {
                 ),
               ),
               Text(
-                '${prediction.winProbability.toStringAsFixed(1)}%',
+                '입상 ${prediction.placeProbability.toStringAsFixed(1)}%',
                 style: TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.w900,
@@ -705,7 +708,7 @@ class _AiRankCard extends StatelessWidget {
             ClipRRect(
               borderRadius: BorderRadius.circular(2),
               child: LinearProgressIndicator(
-                value: (prediction.winProbability / 100).clamp(0, 1),
+                value: (prediction.placeProbability / 100).clamp(0, 1),
                 minHeight: 4,
                 backgroundColor: Colors.transparent,
                 valueColor: const AlwaysStoppedAnimation(Color(0xFF00C853)),
@@ -1282,8 +1285,10 @@ List<_Candidate> _buildRanked(
     final placeScore = pred?.placeProbability ?? 0;
     final oddsScore = winOdds > 0 ? (100 / winOdds).clamp(0, 100) : 0.0;
     final formScore = e.placeRate > 0
-        ? (e.placeRate * 0.65 + (e.rating > 0 ? e.rating.clamp(0, 100) : e.winRate * 2.0) * 0.35)
-            .clamp(0, 100)
+        ? (e.placeRate * 0.65 +
+                  (e.rating > 0 ? e.rating.clamp(0, 100) : e.winRate * 2.0) *
+                      0.35)
+              .clamp(0, 100)
         : e.rating > 0
         ? e.rating.clamp(0, 100)
         : (e.winRate * 2.3).clamp(0, 100);

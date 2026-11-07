@@ -703,7 +703,7 @@ class _TrainingCondition extends StatelessWidget {
     if (recentRaces >= 3) {
       isTrainingActive = true;
       trainingVolume = '활발';
-      details.add('최근 2개월 ${recentRaces}회 출주');
+      details.add('최근 2개월 $recentRaces회 출주');
     } else if (recentRaces >= 1) {
       isTrainingActive = true;
       trainingVolume = '보통';
@@ -970,7 +970,7 @@ class _Recent5Races extends StatelessWidget {
                   ),
                   Expanded(
                     child: Text(
-                      r.winOdds > 0 ? '${r.winOdds.toStringAsFixed(1)}' : '-',
+                      r.winOdds > 0 ? r.winOdds.toStringAsFixed(1) : '-',
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         fontSize: 12,

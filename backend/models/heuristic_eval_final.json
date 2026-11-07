@@ -1,0 +1,82 @@
+{
+  "generated_at": "2026-11-07T22:42:15.674626",
+  "mode": "eval_only",
+  "dataset": {
+    "race_count": 856,
+    "date_count": 66,
+    "first_date": "20260308",
+    "last_date": "20261101",
+    "race_keys_sha256": "9daa9354fc1ad503f443cc0afea0774c08d68d2247fdd634512996f1b89267b7",
+    "git_commit": "5b555bbaad20a94b66dcf5f3fdf4588f69f34edd",
+    "git_dirty": true
+  },
+  "cv_metrics": {
+    "top1_acc": 0.554128,
+    "exact_top3_rate": 0.144954,
+    "ordered_top3_exact": 0.06422,
+    "top3_overlap": 0.608563,
+    "top3_match": 0.608563,
+    "top3_winner": 0.811009,
+    "place_recall_at4": 0.722936,
+    "at_least_2_of_3": 0.710092,
+    "place_brier": 0.154531,
+    "races": 545,
+    "objective": 0.328186
+  },
+  "holdout_metrics": {
+    "top1_acc": 0.601504,
+    "exact_top3_rate": 0.135338,
+    "ordered_top3_exact": 0.075188,
+    "top3_overlap": 0.601504,
+    "top3_match": 0.601504,
+    "top3_winner": 0.827068,
+    "place_recall_at4": 0.701754,
+    "at_least_2_of_3": 0.699248,
+    "place_brier": 0.14931,
+    "races": 133,
+    "objective": 0.323415
+  },
+  "baselines": {
+    "rating": {
+      "exact_top3_rate": 0.030075,
+      "ordered_top3_exact": 0.0,
+      "top3_overlap": 0.340852,
+      "top3_match": 0.340852,
+      "at_least_2_of_3": 0.195489,
+      "top1_acc": 0.082707,
+      "races": 133
+    },
+    "place_rate": {
+      "exact_top3_rate": 0.150376,
+      "ordered_top3_exact": 0.090226,
+      "top3_overlap": 0.598997,
+      "top3_match": 0.598997,
+      "at_least_2_of_3": 0.684211,
+      "top1_acc": 0.466165,
+      "races": 133
+    }
+  },
+  "params": {
+    "w_rating": 0.047196,
+    "w_perf": 0.302457,
+    "w_class_form": 0.223791,
+    "w_pace": 0.066967,
+    "w_condition": 0.146492,
+    "w_market": 0.0,
+    "w_jockey": 0.046953,
+    "w_recent_form": 0.113826,
+    "w_fitness": 0.000185,
+    "w_trainer": 0.052134,
+    "w_combo": 0.0,
+    "w_speed": 0.0,
+    "w_burden": 0.0,
+    "w_gate": 0.0,
+    "rating_pow": 1.352378,
+    "prior_weight": 2.0,
+    "temp_scale": 0.75,
+    "place_temp_scale": 0.682171,
+    "place_specialist_mix": 0.275652,
+    "place_rating_pow": 1.085532,
+    "reliability_penalty": 0.049174
+  }
+}

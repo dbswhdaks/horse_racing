@@ -16,22 +16,31 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import os
 import random
-from dataclasses import dataclass
+import subprocess
+from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Any
 
 from supabase import create_client
 
 from config import SUPABASE_SERVICE_KEY, SUPABASE_URL
+from data_quality import race_integrity_issues, synthetic_race_keys
 from entry_features import (
+    BURDEN_FEATURE_KEY,
+    COMBO_FEATURE_KEY,
     FITNESS_FEATURE_KEY,
+    GATE_FEATURE_KEY,
     JOCKEY_FEATURE_KEY,
     NEUTRAL_SCORE,
     RECENT_FORM_FEATURE_KEY,
+    RUNNING_STYLE_FEATURE_KEY,
+    SPEED_FEATURE_KEY,
+    TRAINER_FEATURE_KEY,
     AsOfFeatureIndex,
 )
 from prediction_constants import (
@@ -54,14 +63,16 @@ _PLACE_PERF_CONSISTENCY = 0.28
 _PLACE_PERF_WIN = 0.10
 
 # 입상 전용 가중합. Dart LocalPredictor 와 같아야 합니다.
-_PLACE_SPEC_RATING = 0.10
-_PLACE_SPEC_PERF = 0.40
+_PLACE_SPEC_RATING = 0.08
+_PLACE_SPEC_PERF = 0.36
 _PLACE_SPEC_CLASS = 0.04
 _PLACE_SPEC_PACE = 0.03
 _PLACE_SPEC_CONDITION = 0.06
-_PLACE_SPEC_JOCKEY = 0.12
-_PLACE_SPEC_FORM = 0.16
-_PLACE_SPEC_FITNESS = 0.09
+_PLACE_SPEC_JOCKEY = 0.10
+_PLACE_SPEC_FORM = 0.12
+_PLACE_SPEC_FITNESS = 0.07
+_PLACE_SPEC_TRAINER = 0.08
+_PLACE_SPEC_COMBO = 0.06
 
 
 @dataclass
@@ -75,6 +86,11 @@ class HeuristicParams:
     w_jockey: float
     w_recent_form: float
     w_fitness: float
+    w_trainer: float
+    w_combo: float
+    w_speed: float
+    w_burden: float
+    w_gate: float
     rating_pow: float
     prior_weight: float
     temp_scale: float
@@ -94,6 +110,11 @@ class HeuristicParams:
             "w_jockey": round(self.w_jockey, 6),
             "w_recent_form": round(self.w_recent_form, 6),
             "w_fitness": round(self.w_fitness, 6),
+            "w_trainer": round(self.w_trainer, 6),
+            "w_combo": round(self.w_combo, 6),
+            "w_speed": round(self.w_speed, 6),
+            "w_burden": round(self.w_burden, 6),
+            "w_gate": round(self.w_gate, 6),
             "rating_pow": round(self.rating_pow, 6),
             "prior_weight": round(self.prior_weight, 6),
             "temp_scale": round(self.temp_scale, 6),
@@ -151,6 +172,16 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="튜닝 JSON 저장 경로(기본: backend/models/heuristic_tuned_params.json)",
     )
+    parser.add_argument(
+        "--eval-only",
+        action="store_true",
+        help="저장된 가중치로 CV/홀드아웃만 평가하고 탐색·저장은 하지 않습니다",
+    )
+    parser.add_argument(
+        "--params",
+        default=None,
+        help="--eval-only 때 읽을 가중치 JSON (기본: heuristic_tuned_params.json)",
+    )
     return parser.parse_args()
 
 
@@ -184,6 +215,10 @@ def _running_styles(entries: list[dict[str, Any]]) -> dict[int, str]:
     result: dict[int, str] = {}
     for e in entries:
         horse_no = _safe_int(e.get("horse_no", 0))
+        from_history = str(e.get(RUNNING_STYLE_FEATURE_KEY, "") or "").strip()
+        if from_history in ("선행", "선입", "중단", "추입"):
+            result[horse_no] = from_history
+            continue
         rating = _safe_float(e.get("rating", 0))
         win_cnt = _safe_int(e.get("win_count", 0))
         total_races = _safe_int(e.get("total_races", 0))
@@ -390,23 +425,47 @@ def _build_race_dataset(
         "race_results",
         (
             "meet,race_date,race_no,horse_no,horse_name,jockey_name,"
-            "rank,horse_weight,distance"
+            "trainer_name,rank,race_time,weight,horse_weight,distance,"
+            "s1f,g3f,pass_order"
         ),
     )
     all_entries = _fetch_all_rows(
         client,
         "race_entries",
         (
-            "meet,race_date,race_no,horse_no,horse_name,jockey_name,age,weight,"
+            "meet,race_date,race_no,horse_no,horse_name,jockey_name,"
+            "trainer_name,age,weight,"
             "rating,total_prize,recent_prize,win_count,place_count,total_races,"
             "horse_weight"
         ),
     )
     all_races = _fetch_all_rows(client, "races", "meet,race_date,race_no,distance")
 
-    # as-of 인덱스는 날짜 필터 이전의 전체 이력으로 만든다. 구간 앞머리 경주도
+    synthetic_keys = synthetic_race_keys(all_results)
+    integrity_issues = race_integrity_issues(all_entries, all_results)
+    invalid_completed_keys = set(integrity_issues)
+    if synthetic_keys:
+        print(f"[QUALITY] 합성 의심 결과 {len(synthetic_keys)}경주를 격리했습니다.")
+    if invalid_completed_keys:
+        print(
+            f"[QUALITY] 출마표/결과 또는 Top3가 불완전한 "
+            f"{len(invalid_completed_keys)}경주를 평가에서 제외합니다."
+        )
+
+    # 합성 결과는 과거 피처에도 섞이지 않도록 인덱스를 만들기 전에 제거한다.
+    clean_history = [
+        row
+        for row in all_results
+        if (
+            str(row.get("meet", "")),
+            str(row.get("race_date", "")),
+            _safe_int(row.get("race_no", 0)),
+        )
+        not in synthetic_keys
+    ]
+    # as-of 인덱스는 날짜 필터 이전의 실제 이력으로 만든다. 구간 앞머리 경주도
     # 과거 성적을 참조할 수 있어야 하기 때문이다.
-    feature_index = AsOfFeatureIndex(all_results)
+    feature_index = AsOfFeatureIndex(clean_history)
 
     if meet:
         all_results = [r for r in all_results if str(r.get("meet", "")) == meet]
@@ -491,6 +550,9 @@ def _build_race_dataset(
         if include_unfinished
         else set(results_by_race.keys()) & set(entries_by_race.keys())
     )
+    selected_keys -= synthetic_keys
+    if not include_unfinished:
+        selected_keys -= invalid_completed_keys
     race_keys = sorted(selected_keys, key=lambda x: (x[1], x[2]))
     if max_races > 0:
         race_keys = race_keys[-max_races:]
@@ -512,10 +574,15 @@ def _build_race_dataset(
             for r in results
             if 1 <= _safe_int(r.get("rank", 0)) <= PLACE_SLOTS
         }
+        actual_ordered_top3 = [
+            _safe_int(r.get("horse_no", 0))
+            for r in sorted(results, key=lambda r: _safe_int(r.get("rank", 999)))
+            if 1 <= _safe_int(r.get("rank", 0)) <= PLACE_SLOTS
+        ]
 
         distance = distance_by_race.get(key, 1400)
         feature_index.attach_to_entries(
-            entries, race_date=key[1], distance=distance
+            entries, race_date=key[1], meet=key[0], distance=distance
         )
 
         samples.append(
@@ -524,6 +591,7 @@ def _build_race_dataset(
                 "entries": entries,
                 "winner_no": winner_no,
                 "actual_top3": actual_top3,
+                "actual_ordered_top3": actual_ordered_top3,
                 "distance": distance,
                 "win_odds": win_odds_by_race.get(key, {}),
             }
@@ -628,6 +696,11 @@ def _race_probabilities(
         jockey_comp = _safe_float(e.get(JOCKEY_FEATURE_KEY, NEUTRAL_SCORE), NEUTRAL_SCORE)
         form_comp = _safe_float(e.get(RECENT_FORM_FEATURE_KEY, NEUTRAL_SCORE), NEUTRAL_SCORE)
         fitness_comp = _safe_float(e.get(FITNESS_FEATURE_KEY, NEUTRAL_SCORE), NEUTRAL_SCORE)
+        trainer_comp = _safe_float(e.get(TRAINER_FEATURE_KEY, NEUTRAL_SCORE), NEUTRAL_SCORE)
+        combo_comp = _safe_float(e.get(COMBO_FEATURE_KEY, NEUTRAL_SCORE), NEUTRAL_SCORE)
+        speed_comp = _safe_float(e.get(SPEED_FEATURE_KEY, NEUTRAL_SCORE), NEUTRAL_SCORE)
+        burden_comp = _safe_float(e.get(BURDEN_FEATURE_KEY, NEUTRAL_SCORE), NEUTRAL_SCORE)
+        gate_comp = _safe_float(e.get(GATE_FEATURE_KEY, NEUTRAL_SCORE), NEUTRAL_SCORE)
 
         s = 1.0 - market_w
         unscaled_base = (
@@ -639,6 +712,11 @@ def _race_probabilities(
             + params.w_jockey * jockey_comp
             + params.w_recent_form * form_comp
             + params.w_fitness * fitness_comp
+            + params.w_trainer * trainer_comp
+            + params.w_combo * combo_comp
+            + params.w_speed * speed_comp
+            + params.w_burden * burden_comp
+            + params.w_gate * gate_comp
         )
         base_score = s * unscaled_base
 
@@ -653,6 +731,8 @@ def _race_probabilities(
             + jockey_comp * _PLACE_SPEC_JOCKEY
             + form_comp * _PLACE_SPEC_FORM
             + fitness_comp * _PLACE_SPEC_FITNESS
+            + trainer_comp * _PLACE_SPEC_TRAINER
+            + combo_comp * _PLACE_SPEC_COMBO
         )
         mix = max(0.0, min(1.0, params.place_specialist_mix))
         place_unscaled = ((1.0 - mix) * unscaled_base) + (mix * place_specialist)
@@ -717,6 +797,10 @@ def _place_order_key(p: dict[str, Any]) -> tuple[float, float, int]:
 
 _EMPTY_METRICS: dict[str, float] = {
     "objective": 0.0,
+    "exact_top3_rate": 0.0,
+    "ordered_top3_exact": 0.0,
+    "top3_overlap": 0.0,
+    # 이전 산출물 소비자를 위한 호환 별칭.
     "top3_match": 0.0,
     "top3_winner": 0.0,
     "place_brier": 1.0,
@@ -730,15 +814,15 @@ _EMPTY_METRICS: dict[str, float] = {
 def _objective_from(metrics: dict[str, float]) -> float:
     w = OBJECTIVE_WEIGHTS
     return (
-        (metrics["top3_match"] * w["top3_match"])
-        + (metrics["top3_winner"] * w["top3_winner"])
+        (metrics["exact_top3_rate"] * w["exact_top3_rate"])
+        + (metrics["top3_overlap"] * w["top3_overlap"])
         + ((1.0 - metrics["place_brier"]) * w["place_brier"])
         + (metrics["top1_acc"] * w["top1_acc"])
     )
 
 
 def _evaluate(samples: list[dict[str, Any]], params: HeuristicParams) -> dict[str, float]:
-    """입상권(Top3) 포함률을 중심으로 예측 품질을 평가한다.
+    """추천 Top3 집합 완전 적중률을 중심으로 예측 품질을 평가한다.
 
     Top3 선정은 `place_probability` 기준이고, `top1_acc` 만 단승 정렬을 쓴다.
     """
@@ -746,7 +830,9 @@ def _evaluate(samples: list[dict[str, Any]], params: HeuristicParams) -> dict[st
         return dict(_EMPTY_METRICS)
 
     top1_hits = 0
-    top3_match_sum = 0.0
+    exact_top3_hits = 0
+    ordered_top3_hits = 0
+    top3_overlap_sum = 0.0
     top3_winner_hits = 0
     recall4_sum = 0.0
     at_least_2_hits = 0
@@ -767,10 +853,12 @@ def _evaluate(samples: list[dict[str, Any]], params: HeuristicParams) -> dict[st
             continue
 
         actual_top3 = race["actual_top3"] or set()
+        actual_ordered_top3 = race.get("actual_ordered_top3", []) or []
 
         win_ranked = sorted(preds, key=_win_order_key)
         place_ranked = sorted(preds, key=_place_order_key)
-        pred_top3 = {p["horse_no"] for p in place_ranked[:PLACE_SLOTS]}
+        pred_ordered_top3 = [p["horse_no"] for p in place_ranked[:PLACE_SLOTS]]
+        pred_top3 = set(pred_ordered_top3)
         pred_top4 = {p["horse_no"] for p in place_ranked[: PLACE_SLOTS + 1]}
 
         if win_ranked[0]["horse_no"] == winner_no:
@@ -781,10 +869,17 @@ def _evaluate(samples: list[dict[str, Any]], params: HeuristicParams) -> dict[st
         if actual_top3:
             denom = min(PLACE_SLOTS, len(actual_top3))
             hits = len(pred_top3 & actual_top3)
-            top3_match_sum += hits / denom
+            top3_overlap_sum += hits / denom
             recall4_sum += len(pred_top4 & actual_top3) / denom
             if hits >= 2:
                 at_least_2_hits += 1
+            if len(actual_top3) == PLACE_SLOTS and pred_top3 == actual_top3:
+                exact_top3_hits += 1
+            if (
+                len(actual_ordered_top3) == PLACE_SLOTS
+                and pred_ordered_top3 == actual_ordered_top3
+            ):
+                ordered_top3_hits += 1
 
         for p in preds:
             y = 1.0 if p["horse_no"] in actual_top3 else 0.0
@@ -795,9 +890,13 @@ def _evaluate(samples: list[dict[str, Any]], params: HeuristicParams) -> dict[st
     if scored_races == 0:
         return dict(_EMPTY_METRICS)
 
+    overlap = top3_overlap_sum / scored_races
     metrics = {
         "top1_acc": top1_hits / scored_races,
-        "top3_match": top3_match_sum / scored_races,
+        "exact_top3_rate": exact_top3_hits / scored_races,
+        "ordered_top3_exact": ordered_top3_hits / scored_races,
+        "top3_overlap": overlap,
+        "top3_match": overlap,
         "top3_winner": top3_winner_hits / scored_races,
         "place_recall_at4": recall4_sum / scored_races,
         "at_least_2_of_3": at_least_2_hits / scored_races,
@@ -808,29 +907,188 @@ def _evaluate(samples: list[dict[str, Any]], params: HeuristicParams) -> dict[st
     return metrics
 
 
+def _evaluate_simple_baseline(
+    samples: list[dict[str, Any]], kind: str
+) -> dict[str, float]:
+    """확률 모델과 동일 cohort에서 단순 정렬 기준을 평가한다."""
+    exact = 0
+    ordered = 0
+    overlap_sum = 0.0
+    at_least_2 = 0
+    top1 = 0
+    races = 0
+    for race in samples:
+        entries = race.get("entries", [])
+        actual = set(race.get("actual_top3", set()))
+        actual_ordered = race.get("actual_ordered_top3", [])
+        if len(actual) != PLACE_SLOTS or not entries:
+            continue
+
+        def score(entry: dict[str, Any]) -> float:
+            if kind == "rating":
+                return _safe_float(entry.get("rating", 0.0))
+            if kind == "place_rate":
+                starts = _safe_int(entry.get("total_races", 0))
+                placed = _safe_int(entry.get("win_count", 0)) + _safe_int(
+                    entry.get("place_count", 0)
+                )
+                return placed / starts if starts > 0 else 0.0
+            raise ValueError(f"지원하지 않는 baseline: {kind}")
+
+        ranked = sorted(
+            entries,
+            key=lambda entry: (
+                -score(entry),
+                -_safe_float(entry.get("rating", 0.0)),
+                _safe_int(entry.get("horse_no", 0)),
+            ),
+        )
+        predicted_ordered = [
+            _safe_int(entry.get("horse_no", 0)) for entry in ranked[:PLACE_SLOTS]
+        ]
+        predicted = set(predicted_ordered)
+        hits = len(predicted & actual)
+        exact += int(predicted == actual)
+        ordered += int(predicted_ordered == actual_ordered)
+        overlap_sum += hits / PLACE_SLOTS
+        at_least_2 += int(hits >= 2)
+        top1 += int(predicted_ordered[0] == race.get("winner_no"))
+        races += 1
+    if races == 0:
+        return dict(_EMPTY_METRICS)
+    return {
+        "exact_top3_rate": exact / races,
+        "ordered_top3_exact": ordered / races,
+        "top3_overlap": overlap_sum / races,
+        "top3_match": overlap_sum / races,
+        "at_least_2_of_3": at_least_2 / races,
+        "top1_acc": top1 / races,
+        "races": races,
+    }
+
+
+def _exact_top3_outcomes(
+    samples: list[dict[str, Any]], params: HeuristicParams
+) -> list[int]:
+    outcomes: list[int] = []
+    for race in samples:
+        actual = set(race.get("actual_top3", set()))
+        if len(actual) != PLACE_SLOTS:
+            continue
+        preds = _race_probabilities(
+            race["entries"], params, win_odds=race.get("win_odds", {}) or None
+        )
+        ranked = sorted(preds, key=_place_order_key)
+        predicted = {p["horse_no"] for p in ranked[:PLACE_SLOTS]}
+        outcomes.append(int(predicted == actual))
+    return outcomes
+
+
+def _paired_bootstrap_exact(
+    champion: list[int],
+    challenger: list[int],
+    *,
+    seed: int,
+    iterations: int = 2000,
+) -> dict[str, float | int]:
+    if len(champion) != len(challenger) or not champion:
+        return {"races": 0, "difference": 0.0, "ci_low": 0.0, "ci_high": 0.0}
+    differences = [b - a for a, b in zip(champion, challenger)]
+    point = sum(differences) / len(differences)
+    rng = random.Random(seed)
+    boot: list[float] = []
+    for _ in range(iterations):
+        boot.append(
+            sum(differences[rng.randrange(len(differences))] for _ in differences)
+            / len(differences)
+        )
+    boot.sort()
+    low = boot[int(iterations * 0.025)]
+    high = boot[min(iterations - 1, int(iterations * 0.975))]
+    return {
+        "races": len(differences),
+        "difference": round(point, 6),
+        "ci_low": round(low, 6),
+        "ci_high": round(high, 6),
+    }
+
+
+def _ablation_report(
+    cv_samples: list[dict[str, Any]],
+    holdout_samples: list[dict[str, Any]],
+    params: HeuristicParams,
+) -> dict[str, Any]:
+    """선택된 가중치에서 각 후보 피처를 하나씩 제거해 기여도를 기록한다."""
+    report: dict[str, Any] = {}
+    for field in (
+        "w_speed",
+        "w_burden",
+        "w_gate",
+        "w_trainer",
+        "w_recent_form",
+        "w_combo",
+        "w_pace",
+    ):
+        without = _normalize_weights(replace(params, **{field: 0.0}))
+        report[field] = {
+            "cv": _round_metrics(_evaluate(cv_samples, without)),
+            "holdout": _round_metrics(_evaluate(holdout_samples, without)),
+        }
+    styled_entries = sum(
+        bool(str(entry.get(RUNNING_STYLE_FEATURE_KEY, "")).strip())
+        for sample in cv_samples + holdout_samples
+        for entry in sample.get("entries", [])
+    )
+    total_entries = sum(
+        len(sample.get("entries", [])) for sample in cv_samples + holdout_samples
+    )
+    report["pass_order_coverage"] = {
+        "styled_entries": styled_entries,
+        "total_entries": total_entries,
+        "ratio": round(styled_entries / total_entries, 6) if total_entries else 0.0,
+    }
+    return report
+
+
 def _walk_forward_blocks(
     samples: list[dict[str, Any]], folds: int
 ) -> list[list[dict[str, Any]]]:
-    """시간순 샘플을 검증 블록 `folds` 개로 나눈다.
+    """시행일을 쪼개지 않고 시간순 검증 블록 `folds` 개로 나눈다.
 
     앞쪽 블록은 as-of 피처 계산의 과거 이력 역할을 하므로 검증에서 제외하고,
     뒤쪽 `folds` 개 블록만 순차적으로 검증에 사용한다.
     """
-    n = len(samples)
-    if n == 0 or folds < 1:
+    if not samples or folds < 1:
         return []
-
+    dates = sorted({str(sample["key"][1]) for sample in samples})
     total_blocks = folds + 1
-    block_size = n // total_blocks
+    block_size = len(dates) // total_blocks
     if block_size < 1:
         return [samples]
 
     blocks: list[list[dict[str, Any]]] = []
     for i in range(1, total_blocks):
         start = i * block_size
-        end = n if i == total_blocks - 1 else (i + 1) * block_size
-        blocks.append(samples[start:end])
+        end = len(dates) if i == total_blocks - 1 else (i + 1) * block_size
+        validation_dates = set(dates[start:end])
+        blocks.append(
+            [sample for sample in samples if str(sample["key"][1]) in validation_dates]
+        )
     return [b for b in blocks if b]
+
+
+def _split_search_holdout_by_date(
+    samples: list[dict[str, Any]], ratio: float = HOLDOUT_RATIO
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """최신 시행일 묶음을 봉인 홀드아웃으로 분리한다."""
+    dates = sorted({str(sample["key"][1]) for sample in samples})
+    if len(dates) < 2 or ratio <= 0:
+        return samples, []
+    holdout_date_count = max(1, int(len(dates) * ratio))
+    holdout_dates = set(dates[-holdout_date_count:])
+    search = [s for s in samples if str(s["key"][1]) not in holdout_dates]
+    holdout = [s for s in samples if str(s["key"][1]) in holdout_dates]
+    return search, holdout
 
 
 def _cross_validate(
@@ -869,6 +1127,11 @@ def _normalize_weights(params: HeuristicParams) -> HeuristicParams:
         + params.w_jockey
         + params.w_recent_form
         + params.w_fitness
+        + params.w_trainer
+        + params.w_combo
+        + params.w_speed
+        + params.w_burden
+        + params.w_gate
     )
     if total <= 0:
         total = 1.0
@@ -882,6 +1145,11 @@ def _normalize_weights(params: HeuristicParams) -> HeuristicParams:
         w_jockey=params.w_jockey / total,
         w_recent_form=params.w_recent_form / total,
         w_fitness=params.w_fitness / total,
+        w_trainer=params.w_trainer / total,
+        w_combo=params.w_combo / total,
+        w_speed=params.w_speed / total,
+        w_burden=params.w_burden / total,
+        w_gate=params.w_gate / total,
         rating_pow=params.rating_pow,
         prior_weight=params.prior_weight,
         temp_scale=params.temp_scale,
@@ -907,6 +1175,11 @@ def heuristic_params_from_dict(
             w_jockey=_safe_float(d.get("w_jockey", 0.0), 0.0),
             w_recent_form=_safe_float(d.get("w_recent_form", 0.0), 0.0),
             w_fitness=_safe_float(d.get("w_fitness", 0.0), 0.0),
+            w_trainer=_safe_float(d.get("w_trainer", 0.05), 0.05),
+            w_combo=_safe_float(d.get("w_combo", 0.04), 0.04),
+            w_speed=_safe_float(d.get("w_speed", 0.0), 0.0),
+            w_burden=_safe_float(d.get("w_burden", 0.0), 0.0),
+            w_gate=_safe_float(d.get("w_gate", 0.0), 0.0),
             rating_pow=_safe_float(d.get("rating_pow", 2.0), 2.0),
             prior_weight=_safe_float(d.get("prior_weight", 7.0), 7.0),
             temp_scale=_safe_float(d.get("temp_scale", 1.0), 1.0),
@@ -945,6 +1218,11 @@ def _mutate(
         w_jockey=n(base.w_jockey, 0.08, 0.0, 0.45),
         w_recent_form=n(base.w_recent_form, 0.10, 0.0, 0.60),
         w_fitness=n(base.w_fitness, 0.08, 0.0, 0.45),
+        w_trainer=n(base.w_trainer, 0.08, 0.0, 0.45),
+        w_combo=n(base.w_combo, 0.06, 0.0, 0.40),
+        w_speed=n(base.w_speed, 0.08, 0.0, 0.45),
+        w_burden=n(base.w_burden, 0.06, 0.0, 0.35),
+        w_gate=n(base.w_gate, 0.05, 0.0, 0.25),
         rating_pow=n(base.rating_pow, 0.25, 0.8, 3.5),
         prior_weight=n(base.prior_weight, 2.5, 2.0, 18.0),
         temp_scale=n(base.temp_scale, 0.20, 0.75, 1.35),
@@ -1012,6 +1290,95 @@ def _sync_predictions(
     return synced
 
 
+def _default_params_path() -> str:
+    return os.path.join(os.path.dirname(__file__), "models", "heuristic_tuned_params.json")
+
+
+def _dataset_metadata(samples: list[dict[str, Any]]) -> dict[str, Any]:
+    keys = sorted("|".join(map(str, sample["key"])) for sample in samples)
+    dates = sorted({str(sample["key"][1]) for sample in samples})
+    try:
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        commit = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repo_root,
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+        dirty = bool(
+            subprocess.check_output(
+                ["git", "status", "--porcelain"],
+                cwd=repo_root,
+                text=True,
+                stderr=subprocess.DEVNULL,
+            ).strip()
+        )
+    except (OSError, subprocess.SubprocessError):
+        commit, dirty = "unknown", True
+    return {
+        "race_count": len(samples),
+        "date_count": len(dates),
+        "first_date": dates[0] if dates else None,
+        "last_date": dates[-1] if dates else None,
+        "race_keys_sha256": hashlib.sha256("\n".join(keys).encode()).hexdigest(),
+        "git_commit": commit,
+        "git_dirty": dirty,
+    }
+
+
+def _load_saved_params(path: str) -> HeuristicParams:
+    with open(path, encoding="utf-8") as f:
+        payload = json.load(f)
+    raw = payload.get("best_params") if isinstance(payload, dict) else None
+    if not isinstance(raw, dict):
+        raise RuntimeError(f"가중치 JSON에 best_params 가 없습니다: {path}")
+    return heuristic_params_from_dict(raw)
+
+
+def _print_eval(
+    *,
+    cv_aggregate: dict[str, float],
+    holdout_samples: list[dict[str, Any]],
+    holdout_metrics: dict[str, float],
+    best_cv: dict[str, Any] | None = None,
+) -> None:
+    print("-" * 60)
+    print(
+        "[CV ] exact3={:.3f} overlap={:.3f} ordered3={:.3f} "
+        "place_brier={:.4f} 2of3={:.3f} top1={:.3f}".format(
+            cv_aggregate["exact_top3_rate"],
+            cv_aggregate["top3_overlap"],
+            cv_aggregate["ordered_top3_exact"],
+            cv_aggregate["place_brier"],
+            cv_aggregate["at_least_2_of_3"],
+            cv_aggregate["top1_acc"],
+        )
+    )
+    if holdout_samples:
+        print(
+            "[HOLD] exact3={:.3f} overlap={:.3f} ordered3={:.3f} "
+            "place_brier={:.4f} 2of3={:.3f} top1={:.3f}".format(
+                holdout_metrics["exact_top3_rate"],
+                holdout_metrics["top3_overlap"],
+                holdout_metrics["ordered_top3_exact"],
+                holdout_metrics["place_brier"],
+                holdout_metrics["at_least_2_of_3"],
+                holdout_metrics["top1_acc"],
+            )
+        )
+        if best_cv is not None:
+            gap = (
+                cv_aggregate["exact_top3_rate"]
+                - holdout_metrics["exact_top3_rate"]
+            )
+            if gap > best_cv["objective_std"] * 2:
+                print(
+                    f"  → 경고: CV와 홀드아웃 exact_top3 격차 {gap:.3f} 가 "
+                    f"fold 표준편차의 2배를 넘습니다. 과적합을 의심하십시오."
+                )
+    print("-" * 60)
+
+
 def main() -> None:
     args = parse_args()
 
@@ -1034,9 +1401,7 @@ def main() -> None:
         print("튜닝 가능한 경주 데이터가 없습니다.")
         return
 
-    holdout_size = int(len(samples) * HOLDOUT_RATIO)
-    search_samples = samples[: len(samples) - holdout_size] if holdout_size else samples
-    holdout_samples = samples[len(samples) - holdout_size :] if holdout_size else []
+    search_samples, holdout_samples = _split_search_holdout_by_date(samples)
 
     blocks = _walk_forward_blocks(search_samples, args.folds)
     if not blocks:
@@ -1049,43 +1414,75 @@ def main() -> None:
         f"홀드아웃 {len(holdout_samples)}"
     )
 
-    baseline = _normalize_weights(
-        HeuristicParams(
-            w_rating=0.324359,
-            w_perf=0.371729,
-            w_class_form=0.020350,
-            w_pace=0.005776,
-            w_condition=0.277786,
-            w_market=0.0,
-            # 신규 피처는 중립 가중으로 시작해 탐색이 값어치를 판단하게 한다.
-            w_jockey=0.080000,
-            w_recent_form=0.120000,
-            w_fitness=0.080000,
-            rating_pow=2.614967,
-            prior_weight=7.375545,
-            temp_scale=1.595725,
-            place_temp_scale=1.000000,
-            place_specialist_mix=0.740000,
-            place_rating_pow=1.450000,
-            reliability_penalty=0.174242,
+    if args.eval_only:
+        params_path = args.params or _default_params_path()
+        params = _load_saved_params(params_path)
+        print(f"[EVAL] 저장된 가중치로만 평가합니다: {params_path}")
+        best_cv = _cross_validate(blocks, params)
+        cv_aggregate = _evaluate(
+            [race for block in blocks for race in block], params
         )
+        holdout_metrics = (
+            _evaluate(holdout_samples, params) if holdout_samples else dict(_EMPTY_METRICS)
+        )
+        print(
+            "[CV-FOLDS] objective={:.4f}(±{:.4f}) folds={}".format(
+                best_cv["objective"],
+                best_cv["objective_std"],
+                [round(f["exact_top3_rate"], 3) for f in best_cv["folds"]],
+            )
+        )
+        _print_eval(
+            cv_aggregate=cv_aggregate,
+            holdout_samples=holdout_samples,
+            holdout_metrics=holdout_metrics,
+            best_cv=best_cv,
+        )
+        if args.output:
+            payload = {
+                "generated_at": datetime.now().isoformat(),
+                "mode": "eval_only",
+                "dataset": _dataset_metadata(samples),
+                "cv_metrics": _round_metrics(cv_aggregate),
+                "holdout_metrics": _round_metrics(holdout_metrics),
+                "baselines": {
+                    "rating": _round_metrics(
+                        _evaluate_simple_baseline(holdout_samples, "rating")
+                    ),
+                    "place_rate": _round_metrics(
+                        _evaluate_simple_baseline(holdout_samples, "place_rate")
+                    ),
+                },
+                "params": params.to_dict(),
+            }
+            os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
+            with open(args.output, "w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=False, indent=2)
+            print(f"[DONE] 평가 결과 저장: {args.output}")
+        return
+
+    champion_path = args.params or _default_params_path()
+    champion_params = _load_saved_params(champion_path)
+    champion_cv = _cross_validate(blocks, champion_params)
+    champion_holdout = (
+        _evaluate(holdout_samples, champion_params)
+        if holdout_samples
+        else dict(_EMPTY_METRICS)
     )
-    best_params = baseline
-    best_cv = _cross_validate(blocks, baseline)
+    best_params = champion_params
+    best_cv = champion_cv
 
     print(
-        "[BASE] objective={:.4f}(±{:.4f}) folds={}".format(
+        "[CHAMPION] objective={:.4f}(±{:.4f}) exact-folds={}".format(
             best_cv["objective"],
             best_cv["objective_std"],
-            [round(f["top3_match"], 3) for f in best_cv["folds"]],
+            [round(f["exact_top3_rate"], 3) for f in best_cv["folds"]],
         )
     )
 
     for trial in range(1, args.trials + 1):
-        candidate = (
-            _mutate(best_params, rng, allow_market=args.include_market_odds)
-            if trial > 1
-            else baseline
+        candidate = _mutate(
+            best_params, rng, allow_market=args.include_market_odds
         )
         cv = _cross_validate(blocks, candidate)
         if cv["objective"] > best_cv["objective"]:
@@ -1096,7 +1493,7 @@ def main() -> None:
                     trial,
                     cv["objective"],
                     cv["objective_std"],
-                    [round(f["top3_match"], 3) for f in cv["folds"]],
+                    [round(f["exact_top3_rate"], 3) for f in cv["folds"]],
                 )
             )
 
@@ -1107,38 +1504,34 @@ def main() -> None:
         _evaluate(holdout_samples, best_params) if holdout_samples else dict(_EMPTY_METRICS)
     )
 
-    print("-" * 60)
-    print(
-        "[CV ] top3_match={:.3f} top3_winner={:.3f} place_brier={:.4f} "
-        "recall@4={:.3f} 2of3={:.3f} top1={:.3f}".format(
-            cv_aggregate["top3_match"],
-            cv_aggregate["top3_winner"],
-            cv_aggregate["place_brier"],
-            cv_aggregate["place_recall_at4"],
-            cv_aggregate["at_least_2_of_3"],
-            cv_aggregate["top1_acc"],
-        )
+    _print_eval(
+        cv_aggregate=cv_aggregate,
+        holdout_samples=holdout_samples,
+        holdout_metrics=holdout_metrics,
+        best_cv=best_cv,
     )
-    if holdout_samples:
-        print(
-            "[HOLD] top3_match={:.3f} top3_winner={:.3f} place_brier={:.4f} "
-            "recall@4={:.3f} 2of3={:.3f} top1={:.3f}".format(
-                holdout_metrics["top3_match"],
-                holdout_metrics["top3_winner"],
-                holdout_metrics["place_brier"],
-                holdout_metrics["place_recall_at4"],
-                holdout_metrics["at_least_2_of_3"],
-                holdout_metrics["top1_acc"],
-            )
-        )
-        gap = cv_aggregate["top3_match"] - holdout_metrics["top3_match"]
-        if gap > best_cv["objective_std"] * 2:
-            print(
-                f"  → 경고: CV와 홀드아웃 top3_match 격차 {gap:.3f} 가 "
-                f"fold 표준편차의 2배를 넘습니다. 과적합을 의심하십시오."
-            )
-    print("-" * 60)
+    paired = _paired_bootstrap_exact(
+        _exact_top3_outcomes(holdout_samples, champion_params),
+        _exact_top3_outcomes(holdout_samples, best_params),
+        seed=args.seed,
+    )
+    accepted = bool(
+        holdout_samples
+        and holdout_metrics["exact_top3_rate"]
+        > champion_holdout["exact_top3_rate"]
+        and holdout_metrics["top3_overlap"]
+        >= champion_holdout["top3_overlap"] - 0.01
+        and holdout_metrics["place_brier"]
+        <= champion_holdout["place_brier"] + 0.01
+        and float(paired["ci_low"]) >= 0.0
+    )
+    print(
+        f"[COMPARE] exact3 차이={paired['difference']:+.3f} "
+        f"95% CI=[{paired['ci_low']:+.3f}, {paired['ci_high']:+.3f}] "
+        f"채택={accepted}"
+    )
 
+    deployed_params = best_params if accepted else champion_params
     result_payload = {
         "generated_at": datetime.now().isoformat(),
         "filters": {
@@ -1157,8 +1550,37 @@ def main() -> None:
         "cv_objective_std": round(best_cv["objective_std"], 6),
         "fold_metrics": [_round_metrics(m) for m in best_cv["folds"]],
         "metrics": _round_metrics(holdout_metrics),
+        "dataset": _dataset_metadata(samples),
+        "baselines": {
+            "rating": _round_metrics(
+                _evaluate_simple_baseline(holdout_samples, "rating")
+            ),
+            "place_rate": _round_metrics(
+                _evaluate_simple_baseline(holdout_samples, "place_rate")
+            ),
+        },
+        "champion": {
+            "params_path": champion_path,
+            "cv_metrics": _round_metrics(
+                _evaluate(
+                    [race for block in blocks for race in block],
+                    champion_params,
+                )
+            ),
+            "holdout_metrics": _round_metrics(champion_holdout),
+            "best_params": champion_params.to_dict(),
+        },
+        "paired_exact_top3": paired,
+        "ablations": _ablation_report(
+            [race for block in blocks for race in block],
+            holdout_samples,
+            best_params,
+        ),
+        "accepted": accepted,
         "objective_weights": dict(OBJECTIVE_WEIGHTS),
-        "best_params": best_params.to_dict(),
+        "candidate_params": best_params.to_dict(),
+        # export_dart_params.py 는 이 키만 읽는다. 기각 시 챔피언을 유지한다.
+        "best_params": deployed_params.to_dict(),
     }
 
     output_path = args.output or os.path.join(
@@ -1171,7 +1593,7 @@ def main() -> None:
         json.dump(result_payload, f, ensure_ascii=False, indent=2)
     print(f"[DONE] 튜닝 결과 저장: {output_path}")
 
-    if args.sync_predictions:
+    if args.sync_predictions and accepted:
         synced = _sync_predictions(
             client=client,
             samples=samples,
@@ -1181,6 +1603,8 @@ def main() -> None:
         print(
             f"[SYNC] model_version={args.model_version} predictions 업서트 완료: {synced}건"
         )
+    elif args.sync_predictions:
+        print("[SYNC] 후보가 채택 기준을 통과하지 않아 predictions 업서트를 건너뜁니다.")
 
 
 if __name__ == "__main__":

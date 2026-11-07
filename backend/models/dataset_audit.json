@@ -1,0 +1,264 @@
+{
+  "generated_at": "2026-11-07T22:43:01.941986",
+  "filters": {
+    "meet": null,
+    "since": null,
+    "until": null
+  },
+  "row_counts": {
+    "races": 1128,
+    "race_entries": 11999,
+    "race_results": 11377,
+    "odds": 0
+  },
+  "distinct_races": {
+    "races": 1128,
+    "race_entries": 1104,
+    "race_results": 1059
+  },
+  "coverage_by_month": {
+    "races": {
+      "202602": 133,
+      "202603": 51,
+      "202605": 162,
+      "202606": 144,
+      "202607": 140,
+      "202608": 95,
+      "202609": 137,
+      "202610": 210,
+      "202611": 56
+    },
+    "race_results": {
+      "202602": 1747,
+      "202603": 755,
+      "202605": 1493,
+      "202606": 1445,
+      "202607": 1298,
+      "202608": 948,
+      "202609": 1388,
+      "202610": 2188,
+      "202611": 115
+    }
+  },
+  "data_quality": {
+    "synthetic_suspect_races": 182,
+    "synthetic_suspect_rows": 2479,
+    "sample_synthetic_races": [
+      [
+        "1",
+        "20260207",
+        1
+      ],
+      [
+        "1",
+        "20260207",
+        2
+      ],
+      [
+        "1",
+        "20260207",
+        3
+      ],
+      [
+        "1",
+        "20260207",
+        4
+      ],
+      [
+        "1",
+        "20260207",
+        5
+      ],
+      [
+        "1",
+        "20260207",
+        6
+      ],
+      [
+        "1",
+        "20260207",
+        7
+      ],
+      [
+        "1",
+        "20260207",
+        8
+      ],
+      [
+        "1",
+        "20260207",
+        9
+      ],
+      [
+        "1",
+        "20260207",
+        10
+      ]
+    ],
+    "integrity_issue_races": 66,
+    "integrity_issue_counts": {
+      "entry_result_horse_no_mismatch": 62,
+      "rank_1_count_0": 46,
+      "rank_2_count_0": 46,
+      "rank_2_count_2": 3,
+      "rank_3_count_0": 49
+    },
+    "sample_integrity_issues": [
+      {
+        "race": [
+          "1",
+          "20260510",
+          1
+        ],
+        "issues": [
+          "entry_result_horse_no_mismatch"
+        ]
+      },
+      {
+        "race": [
+          "1",
+          "20260510",
+          2
+        ],
+        "issues": [
+          "entry_result_horse_no_mismatch"
+        ]
+      },
+      {
+        "race": [
+          "1",
+          "20260510",
+          3
+        ],
+        "issues": [
+          "entry_result_horse_no_mismatch"
+        ]
+      },
+      {
+        "race": [
+          "1",
+          "20260510",
+          4
+        ],
+        "issues": [
+          "entry_result_horse_no_mismatch"
+        ]
+      },
+      {
+        "race": [
+          "1",
+          "20260510",
+          5
+        ],
+        "issues": [
+          "entry_result_horse_no_mismatch"
+        ]
+      },
+      {
+        "race": [
+          "1",
+          "20260510",
+          6
+        ],
+        "issues": [
+          "entry_result_horse_no_mismatch"
+        ]
+      },
+      {
+        "race": [
+          "1",
+          "20260510",
+          7
+        ],
+        "issues": [
+          "entry_result_horse_no_mismatch"
+        ]
+      },
+      {
+        "race": [
+          "1",
+          "20260510",
+          8
+        ],
+        "issues": [
+          "entry_result_horse_no_mismatch"
+        ]
+      },
+      {
+        "race": [
+          "1",
+          "20260510",
+          9
+        ],
+        "issues": [
+          "entry_result_horse_no_mismatch"
+        ]
+      },
+      {
+        "race": [
+          "1",
+          "20260510",
+          10
+        ],
+        "issues": [
+          "entry_result_horse_no_mismatch"
+        ]
+      }
+    ],
+    "entry_missing_rates": {
+      "rating": 0.2074,
+      "weight": 0.0149,
+      "horse_weight": 0.8077,
+      "total_prize": 0.0788,
+      "recent_prize": 0.0906,
+      "total_races": 0.0178
+    },
+    "result_missing_rates": {
+      "rank": 0.0161,
+      "race_time": 0.016,
+      "weight": 0.0,
+      "horse_weight": 0.0081,
+      "s1f": 1.0,
+      "g3f": 1.0,
+      "pass_order": 1.0,
+      "distance": 0.0
+    }
+  },
+  "trainable": {
+    "races_with_entries": 1104,
+    "races_with_results": 856,
+    "races_with_both": 856,
+    "entries_only": 248,
+    "results_only": 0,
+    "dropped_field_lt_5": 0,
+    "dropped_no_winner": 0,
+    "trainable_races": 856,
+    "trainable_by_month": {
+      "202603": 2,
+      "202605": 131,
+      "202606": 143,
+      "202607": 129,
+      "202608": 94,
+      "202609": 137,
+      "202610": 209,
+      "202611": 11
+    },
+    "sample_dropped_small_field": [],
+    "sample_dropped_no_winner": []
+  },
+  "win_odds_leakage": {
+    "winner_rows": 1058,
+    "winner_filled_rate": 1.0,
+    "non_winner_rows": 10176,
+    "non_winner_filled_rate": 0.8458,
+    "usable_as_prerace_feature": false,
+    "verdict": "사용 금지: 전 출주마 커버리지는 높지만 확정 결과의 배당이며 경주 전 captured_at 이 없습니다."
+  },
+  "odds_capture": {
+    "win_odds_rows": 0,
+    "captured_on_or_before_race_day": 0,
+    "prerace_ratio": 0.0,
+    "missing_captured_at": 0,
+    "usable_as_prerace_feature": false
+  }
+}

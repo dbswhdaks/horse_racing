@@ -278,7 +278,7 @@ final oddsProvider =
       );
     });
 
-// ── Predictions: Supabase place model → Local place model → ML fallback ──
+// ── Predictions: 동일 버전 Supabase → 검증된 Local → 운영 ML fallback ──
 
 final predictionProvider =
     FutureProvider.family<
@@ -329,24 +329,7 @@ final predictionProvider =
         }
       } catch (_) {}
 
-      // 2) 학습·검증된 ML 모델. 휴리스틱 응답은 로컬 엔진과 중복되므로 제외한다.
-      try {
-        final entries = await entriesFuture;
-        final mlApi = ref.read(mlApiServiceProvider);
-        final remote = await mlApi.getPrediction(
-          meet: params.meet,
-          date: params.date,
-          raceNo: params.raceNo,
-        );
-        if (remote != null &&
-            remote.predictions.isNotEmpty &&
-            PredictionConstants.isProductionMlVersion(remote.modelVersion) &&
-            (entries.isEmpty || _isPredictionAligned(remote, entries))) {
-          return remote;
-        }
-      } catch (_) {}
-
-      // 3) 원격 모델을 사용할 수 없으면 동일 입력 기반 로컬 모델로 폴백한다.
+      // 2) 저장 예측이 없으면 앱과 튜너가 공유하는 검증된 로컬 엔진을 쓴다.
       try {
         final entries = await entriesFuture;
         if (entries.isNotEmpty) {
@@ -366,6 +349,23 @@ final predictionProvider =
             odds: odds,
             features: features,
           );
+        }
+      } catch (_) {}
+
+      // 3) 출마표/로컬 계산을 사용할 수 없을 때만 배포된 ML 모델로 폴백한다.
+      try {
+        final entries = await entriesFuture;
+        final mlApi = ref.read(mlApiServiceProvider);
+        final remote = await mlApi.getPrediction(
+          meet: params.meet,
+          date: params.date,
+          raceNo: params.raceNo,
+        );
+        if (remote != null &&
+            remote.predictions.isNotEmpty &&
+            PredictionConstants.isProductionMlVersion(remote.modelVersion) &&
+            (entries.isEmpty || _isPredictionAligned(remote, entries))) {
+          return remote;
         }
       } catch (_) {}
 
@@ -404,6 +404,7 @@ final entryFeaturesProvider =
       final supa = ref.read(supabaseServiceProvider);
       return _withTimeout<Map<int, EntryFeatureScores>>(
         supa.getEntryFeaturesBatch(
+          meet: params.meet,
           raceDate: params.date,
           distance: distance ?? 0,
           entries: entries,

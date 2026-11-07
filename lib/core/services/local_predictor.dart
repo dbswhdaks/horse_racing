@@ -21,32 +21,39 @@ class LocalPredictor {
   static const _placePerfWin = 0.10;
 
   /// 입상 전용 가중합. 파이썬 `_PLACE_SPEC_*` 와 같아야 합니다.
-  static const _placeSpecRating = 0.10;
-  static const _placeSpecPerf = 0.40;
+  static const _placeSpecRating = 0.08;
+  static const _placeSpecPerf = 0.36;
   static const _placeSpecClass = 0.04;
   static const _placeSpecPace = 0.03;
   static const _placeSpecCondition = 0.06;
-  static const _placeSpecJockey = 0.12;
-  static const _placeSpecForm = 0.16;
-  static const _placeSpecFitness = 0.09;
+  static const _placeSpecJockey = 0.10;
+  static const _placeSpecForm = 0.12;
+  static const _placeSpecFitness = 0.07;
+  static const _placeSpecTrainer = 0.08;
+  static const _placeSpecCombo = 0.06;
 
   // TUNED_PARAMS_BEGIN
   static const _params = _HeuristicParams(
-    wRating: 0.253406,
-    wPerformance: 0.290413,
-    wClassForm: 0.015898,
-    wPace: 0.004513,
-    wCondition: 0.217020,
-    wJockey: 0.062500,
-    wRecentForm: 0.093750,
-    wFitness: 0.062500,
-    ratingPow: 2.614967,
-    priorWeight: 7.375545,
-    tempScale: 1.595725,
-    placeTempScale: 1.000000,
-    placeSpecialistMix: 0.740000,
-    placeRatingPow: 1.450000,
-    reliabilityPenalty: 0.174242,
+    wRating: 0.047196,
+    wPerformance: 0.302457,
+    wClassForm: 0.223791,
+    wPace: 0.066967,
+    wCondition: 0.146492,
+    wJockey: 0.046953,
+    wRecentForm: 0.113826,
+    wFitness: 0.000185,
+    wTrainer: 0.052134,
+    wCombo: 0.000000,
+    wSpeed: 0.000000,
+    wBurden: 0.000000,
+    wGate: 0.000000,
+    ratingPow: 1.352378,
+    priorWeight: 2.000000,
+    tempScale: 0.750000,
+    placeTempScale: 0.682171,
+    placeSpecialistMix: 0.275652,
+    placeRatingPow: 1.085532,
+    reliabilityPenalty: 0.049174,
   );
   // TUNED_PARAMS_END
   static const _wMarket = PredictionConstants.marketWeight;
@@ -97,7 +104,7 @@ class LocalPredictor {
     final maxHorseWeight = entries.map((e) => e.horseWeight).reduce(max);
     final minHorseWeight = entries.map((e) => e.horseWeight).reduce(min);
 
-    final styles = _analyzeRunningStyles(entries);
+    final styles = _analyzeRunningStyles(entries, features);
     final frontCount = styles.values
         .where((s) => s == '선행' || s == '선입')
         .length;
@@ -184,7 +191,8 @@ class LocalPredictor {
       );
 
       // as-of 시계열 피처. 공급되지 않으면 중립값이라 점수에 영향이 없습니다.
-      final entryFeatures = features[entry.horseNo] ?? EntryFeatureScores.neutral;
+      final entryFeatures =
+          features[entry.horseNo] ?? EntryFeatureScores.neutral;
 
       final base0to1 =
           (ratingScore * _params.wRating) +
@@ -194,7 +202,12 @@ class LocalPredictor {
           (conditionScore * _params.wCondition) +
           (entryFeatures.jockey * _params.wJockey) +
           (entryFeatures.recentForm * _params.wRecentForm) +
-          (entryFeatures.fitness * _params.wFitness);
+          (entryFeatures.fitness * _params.wFitness) +
+          (entryFeatures.trainer * _params.wTrainer) +
+          (entryFeatures.combo * _params.wCombo) +
+          (entryFeatures.speed * _params.wSpeed) +
+          (entryFeatures.burden * _params.wBurden) +
+          (entryFeatures.gate * _params.wGate);
 
       final marketComp = marketByHorse[entry.horseNo] ?? 0.5;
       final s = (1.0 - marketWeight).clamp(0.0, 1.0);
@@ -210,7 +223,9 @@ class LocalPredictor {
           (conditionScore * _placeSpecCondition) +
           (entryFeatures.jockey * _placeSpecJockey) +
           (entryFeatures.recentForm * _placeSpecForm) +
-          (entryFeatures.fitness * _placeSpecFitness);
+          (entryFeatures.fitness * _placeSpecFitness) +
+          (entryFeatures.trainer * _placeSpecTrainer) +
+          (entryFeatures.combo * _placeSpecCombo);
       final mix = _params.placeSpecialistMix.clamp(0.0, 1.0);
       final placeBase0to1 = ((1.0 - mix) * base0to1) + (mix * placeSpecialist);
 
@@ -242,6 +257,11 @@ class LocalPredictor {
         'jockey': entryFeatures.jockey * 100.0,
         'recent_form': entryFeatures.recentForm * 100.0,
         'fitness': entryFeatures.fitness * 100.0,
+        'trainer': entryFeatures.trainer * 100.0,
+        'combo': entryFeatures.combo * 100.0,
+        'speed': entryFeatures.speed * 100.0,
+        'burden': entryFeatures.burden * 100.0,
+        'gate': entryFeatures.gate * 100.0,
       };
     }
 
@@ -329,11 +349,7 @@ class LocalPredictor {
     );
   }
 
-  static double _calcTemperature(
-    int horseCount,
-    double spread,
-    double scale,
-  ) {
+  static double _calcTemperature(int horseCount, double spread, double scale) {
     final base = horseCount <= 6
         ? 6.8
         : horseCount <= 10
@@ -407,9 +423,17 @@ class LocalPredictor {
 
   static double _clamp01(double v) => v.clamp(0.0, 1.0).toDouble();
 
-  static Map<int, String> _analyzeRunningStyles(List<RaceEntry> entries) {
+  static Map<int, String> _analyzeRunningStyles(
+    List<RaceEntry> entries,
+    Map<int, EntryFeatureScores> features,
+  ) {
     final result = <int, String>{};
     for (final e in entries) {
+      final fromHistory = features[e.horseNo]?.runningStyle.trim() ?? '';
+      if (fromHistory.isNotEmpty) {
+        result[e.horseNo] = fromHistory;
+        continue;
+      }
       if (e.rating >= 85 && e.winRate >= 20) {
         result[e.horseNo] = '선행';
       } else if (e.rating >= 70 && e.winRate >= 10) {
@@ -579,6 +603,11 @@ class _HeuristicParams {
   final double wJockey;
   final double wRecentForm;
   final double wFitness;
+  final double wTrainer;
+  final double wCombo;
+  final double wSpeed;
+  final double wBurden;
+  final double wGate;
   final double ratingPow;
   final double priorWeight;
   final double tempScale;
@@ -596,6 +625,11 @@ class _HeuristicParams {
     required this.wJockey,
     required this.wRecentForm,
     required this.wFitness,
+    required this.wTrainer,
+    required this.wCombo,
+    required this.wSpeed,
+    required this.wBurden,
+    required this.wGate,
     required this.ratingPow,
     required this.priorWeight,
     required this.tempScale,

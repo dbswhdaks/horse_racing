@@ -19,6 +19,11 @@ from typing import Any
 from supabase import create_client
 
 from config import SUPABASE_SERVICE_KEY, SUPABASE_URL
+from data_quality import (
+    column_missing_rates,
+    race_integrity_issues,
+    synthetic_race_keys,
+)
 from prediction_constants import MIN_ENTRIES_PER_RACE
 from tune_heuristic_predictions import (
     _fetch_all_rows,
@@ -142,12 +147,16 @@ def audit_win_odds(results: list[dict[str, Any]]) -> dict[str, Any]:
     winner_rate = (winner_filled / winner_total) if winner_total else 0.0
     loser_rate = (loser_filled / loser_total) if loser_total else 0.0
 
-    # 비1착 행의 채움률이 충분히 높아야 "모든 출주마의 사전 배당"으로 신뢰할 수 있다.
-    usable = loser_total > 0 and loser_rate >= 0.80
-    if usable:
-        verdict = "사용 가능: 비1착 행에도 배당이 채워져 있어 사전 시장 피처로 쓸 수 있습니다."
-    elif loser_rate < 0.05:
+    # race_results 는 결과 API에서 온 확정값이고 수집시각도 없다. 커버리지가
+    # 높아도 경주 전 값임을 증명할 수 없으므로 사전 피처로는 항상 금지한다.
+    usable = False
+    if loser_rate < 0.05:
         verdict = "사용 금지: 사실상 1착 행에만 배당이 있어 결과 누출입니다."
+    elif loser_rate >= 0.80:
+        verdict = (
+            "사용 금지: 전 출주마 커버리지는 높지만 확정 결과의 배당이며 "
+            "경주 전 captured_at 이 없습니다."
+        )
     else:
         verdict = "보류: 채움률이 불균일합니다. 원인 파악 전에는 사용하지 마십시오."
 
@@ -199,9 +208,21 @@ def main() -> None:
     client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
     races = _fetch_all_rows(client, "races", "meet,race_date,race_no,distance")
-    entries = _fetch_all_rows(client, "race_entries", "meet,race_date,race_no,horse_no")
+    entries = _fetch_all_rows(
+        client,
+        "race_entries",
+        (
+            "meet,race_date,race_no,horse_no,rating,weight,horse_weight,"
+            "total_prize,recent_prize,total_races"
+        ),
+    )
     results = _fetch_all_rows(
-        client, "race_results", "meet,race_date,race_no,horse_no,rank,win_odds"
+        client,
+        "race_results",
+        (
+            "meet,race_date,race_no,horse_no,rank,race_time,weight,"
+            "horse_weight,win_odds,s1f,g3f,pass_order,distance"
+        ),
     )
     odds = _fetch_all_rows(
         client, "odds", "meet,race_date,race_no,bet_type,horse_no1,rate,captured_at"
@@ -219,6 +240,28 @@ def main() -> None:
     results = _filter_by_race_date(results, **date_filter)
     odds = _filter_by_race_date(odds, **date_filter)
 
+    synthetic_keys = synthetic_race_keys(results)
+    integrity = race_integrity_issues(entries, results)
+    clean_results = [
+        row
+        for row in results
+        if (
+            str(row.get("meet", "")),
+            str(row.get("race_date", "")),
+            _safe_int(row.get("race_no", 0)),
+        )
+        not in synthetic_keys
+    ]
+    eligible_results = [
+        row
+        for row in clean_results
+        if (
+            str(row.get("meet", "")),
+            str(row.get("race_date", "")),
+            _safe_int(row.get("race_no", 0)),
+        )
+        not in integrity
+    ]
     report = {
         "generated_at": datetime.now().isoformat(),
         "filters": {"meet": args.meet, "since": args.since, "until": args.until},
@@ -237,7 +280,50 @@ def main() -> None:
             "races": _coverage_by_month(races),
             "race_results": _coverage_by_month(results),
         },
-        "trainable": audit_trainable_races(entries, results),
+        "data_quality": {
+            "synthetic_suspect_races": len(synthetic_keys),
+            "synthetic_suspect_rows": len(results) - len(clean_results),
+            "sample_synthetic_races": [list(k) for k in sorted(synthetic_keys)[:10]],
+            "integrity_issue_races": len(integrity),
+            "integrity_issue_counts": dict(
+                sorted(
+                    {
+                        issue: sum(issue in issues for issues in integrity.values())
+                        for issues in integrity.values()
+                        for issue in issues
+                    }.items()
+                )
+            ),
+            "sample_integrity_issues": [
+                {"race": list(key), "issues": list(issues)}
+                for key, issues in sorted(integrity.items())[:10]
+            ],
+            "entry_missing_rates": column_missing_rates(
+                entries,
+                (
+                    "rating",
+                    "weight",
+                    "horse_weight",
+                    "total_prize",
+                    "recent_prize",
+                    "total_races",
+                ),
+            ),
+            "result_missing_rates": column_missing_rates(
+                clean_results,
+                (
+                    "rank",
+                    "race_time",
+                    "weight",
+                    "horse_weight",
+                    "s1f",
+                    "g3f",
+                    "pass_order",
+                    "distance",
+                ),
+            ),
+        },
+        "trainable": audit_trainable_races(entries, eligible_results),
         "win_odds_leakage": audit_win_odds(results),
         "odds_capture": audit_odds_capture(odds),
     }
@@ -252,6 +338,14 @@ def main() -> None:
     print(f"학습 가능 경주: {trainable}건 (목표 3000건)")
     if trainable < 3000:
         print("  → 표본 부족. historical-backfill 워크플로로 과거 데이터를 확대하십시오.")
+    print(
+        f"합성 의심 격리: {report['data_quality']['synthetic_suspect_races']}경주 / "
+        f"{report['data_quality']['synthetic_suspect_rows']}행"
+    )
+    print(
+        f"정합성 문제: {report['data_quality']['integrity_issue_races']}경주 "
+        f"{report['data_quality']['integrity_issue_counts']}"
+    )
     print("-" * 60)
     print(f"win_odds 감사: {report['win_odds_leakage']['verdict']}")
     print(f"  1착 채움률={report['win_odds_leakage']['winner_filled_rate']:.2%} "

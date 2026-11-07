@@ -40,12 +40,17 @@ void main() {
           return PastRunRecord(
             raceDate: row['race_date'] as String,
             raceNo: (row['race_no'] as num).toInt(),
+            meet: row['meet'] as String? ?? '',
             horseName: row['horse_name'] as String,
             jockeyName: row['jockey_name'] as String,
+            trainerName: row['trainer_name'] as String? ?? '',
             rank: (row['rank'] as num).toInt(),
             fieldSize: sizes[key] ?? 0,
             distance: (row['distance'] as num).toInt(),
+            raceTime: row['race_time'] as String? ?? '',
+            carriedWeight: (row['weight'] as num?)?.toDouble() ?? 0,
             horseWeight: (row['horse_weight'] as num).toDouble(),
+            passOrder: row['pass_order'] as String? ?? '',
           );
         }),
       );
@@ -69,10 +74,15 @@ void main() {
 
         final actual = index.featuresFor(
           raceDate: raceDate,
+          meet: testCase['meet'] as String? ?? '',
           horseName: horseName,
           jockeyName: testCase['jockey_name'] as String,
+          trainerName: testCase['trainer_name'] as String? ?? '',
           distance: (testCase['distance'] as num).toInt(),
+          carriedWeight: (testCase['carried_weight'] as num?)?.toDouble() ?? 0,
           horseWeight: (testCase['horse_weight'] as num).toDouble(),
+          horseNo: (testCase['horse_no'] as num?)?.toInt() ?? 0,
+          fieldSize: (testCase['field_size'] as num?)?.toInt() ?? 0,
         );
 
         final label = '$raceDate/$horseName';
@@ -91,6 +101,36 @@ void main() {
           closeTo((expected['fitness'] as num).toDouble(), 1e-9),
           reason: '$label fitness',
         );
+        expect(
+          actual.trainer,
+          closeTo((expected['trainer'] as num).toDouble(), 1e-9),
+          reason: '$label trainer',
+        );
+        expect(
+          actual.combo,
+          closeTo((expected['combo'] as num).toDouble(), 1e-9),
+          reason: '$label combo',
+        );
+        expect(
+          actual.speed,
+          closeTo((expected['speed'] as num).toDouble(), 1e-9),
+          reason: '$label speed',
+        );
+        expect(
+          actual.burden,
+          closeTo((expected['burden'] as num).toDouble(), 1e-9),
+          reason: '$label burden',
+        );
+        expect(
+          actual.gate,
+          closeTo((expected['gate'] as num).toDouble(), 1e-9),
+          reason: '$label gate',
+        );
+        expect(
+          actual.runningStyle,
+          expected['running_style'] as String? ?? '',
+          reason: '$label runningStyle',
+        );
       }
     });
 
@@ -100,6 +140,7 @@ void main() {
         raceDate: '20240105',
         horseName: '말01',
         jockeyName: '기수01',
+        trainerName: '조교사01',
         distance: 1200,
         horseWeight: 480,
       );
@@ -107,6 +148,9 @@ void main() {
       expect(scores.jockey, neutralFeatureScore);
       expect(scores.recentForm, neutralFeatureScore);
       expect(scores.fitness, neutralFeatureScore);
+      expect(scores.trainer, neutralFeatureScore);
+      expect(scores.combo, neutralFeatureScore);
+      expect(scores.runningStyle, isEmpty);
     });
 
     test('이력이 없는 말과 기수는 중립값을 받는다', () {
@@ -114,6 +158,7 @@ void main() {
         raceDate: '20250425',
         horseName: '등록되지않은말',
         jockeyName: '등록되지않은기수',
+        trainerName: '등록되지않은조교사',
         distance: 1400,
         horseWeight: 470,
       );
@@ -121,6 +166,9 @@ void main() {
       expect(scores.jockey, neutralFeatureScore);
       expect(scores.recentForm, neutralFeatureScore);
       expect(scores.fitness, neutralFeatureScore);
+      expect(scores.trainer, neutralFeatureScore);
+      expect(scores.combo, neutralFeatureScore);
+      expect(scores.runningStyle, isEmpty);
     });
   });
 }

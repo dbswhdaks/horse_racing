@@ -166,6 +166,7 @@ class SupabaseService {
   /// 계산식은 `backend/entry_features.py` 와 동일하며, 조회 실패 시 호출부가
   /// 중립값으로 폴백할 수 있도록 빈 맵을 반환합니다.
   Future<Map<int, EntryFeatureScores>> getEntryFeaturesBatch({
+    required String meet,
     required String raceDate,
     required int distance,
     required List<RaceEntry> entries,
@@ -182,14 +183,24 @@ class SupabaseService {
         .where((name) => name.isNotEmpty)
         .toSet()
         .toList();
-    if (horseNames.isEmpty && jockeyNames.isEmpty) return const {};
+    final trainerNames = entries
+        .map((e) => e.trainerName.trim())
+        .where((name) => name.isNotEmpty)
+        .toSet()
+        .toList();
+    if (horseNames.isEmpty && jockeyNames.isEmpty && trainerNames.isEmpty) {
+      return const {};
+    }
 
-    // 기수 점수는 최근 1년 입상률만 쓰므로 말 이력보다 좁게 조회해 응답을 줄입니다.
+    // 기수·조교사 점수는 최근 1년 입상률만 쓰므로 말 이력보다 좁게 조회해 응답을 줄입니다.
     final horseSince = _shiftDate(raceDate, -_horseHistoryDays);
     final jockeySince = _shiftDate(raceDate, -jockeyWindowDays);
-    if (horseSince == null || jockeySince == null) return const {};
+    final trainerSince = _shiftDate(raceDate, -trainerWindowDays);
+    if (horseSince == null || jockeySince == null || trainerSince == null) {
+      return const {};
+    }
 
-    // 두 조회는 서로 의존하지 않으므로 병렬로 보냅니다.
+    // 세 조회는 서로 의존하지 않으므로 병렬로 보냅니다.
     final fetched = await Future.wait([
       horseNames.isEmpty
           ? Future.value(const <Map<String, dynamic>>[])
@@ -207,13 +218,24 @@ class SupabaseService {
               since: jockeySince,
               until: raceDate,
             ),
+      trainerNames.isEmpty
+          ? Future.value(const <Map<String, dynamic>>[])
+          : _fetchPastRuns(
+              column: 'trainer_name',
+              values: trainerNames,
+              since: trainerSince,
+              until: raceDate,
+            ),
     ]);
     final horseRows = fetched[0];
-    if (horseRows.isEmpty && fetched[1].isEmpty) return const {};
+    if (horseRows.isEmpty && fetched[1].isEmpty && fetched[2].isEmpty) {
+      return const {};
+    }
 
-    // 같은 경주 행이 말·기수 양쪽 조회에 중복으로 잡히므로 한 번만 남깁니다.
+    // 같은 경주 행이 말·기수·조교사 조회에 중복으로 잡히므로 한 번만 남깁니다.
     final deduped = <String, Map<String, dynamic>>{};
-    for (final row in [...horseRows, ...fetched[1]]) {
+    for (final row in [...horseRows, ...fetched[1], ...fetched[2]]) {
+      if (_looksSyntheticResult(row)) continue;
       final key =
           '${row['meet']}_${row['race_date']}_${row['race_no']}_${row['horse_no']}';
       deduped[key] = row;
@@ -230,12 +252,17 @@ class SupabaseService {
         return PastRunRecord(
           raceDate: rowDate,
           raceNo: raceNo,
+          meet: row['meet']?.toString() ?? '',
           horseName: row['horse_name']?.toString() ?? '',
           jockeyName: row['jockey_name']?.toString() ?? '',
+          trainerName: row['trainer_name']?.toString() ?? '',
           rank: (row['rank'] as num?)?.toInt() ?? 0,
           fieldSize: fieldSizes['${row['meet']}_${rowDate}_$raceNo'] ?? 0,
           distance: (row['distance'] as num?)?.toInt() ?? 0,
+          raceTime: row['race_time']?.toString() ?? '',
+          carriedWeight: (row['weight'] as num?)?.toDouble() ?? 0,
           horseWeight: (row['horse_weight'] as num?)?.toDouble() ?? 0,
+          passOrder: row['pass_order']?.toString() ?? '',
         );
       }),
     );
@@ -244,16 +271,39 @@ class SupabaseService {
       for (final entry in entries)
         entry.horseNo: index.featuresFor(
           raceDate: raceDate,
+          meet: meet,
           horseName: entry.horseName,
           jockeyName: entry.jockeyName,
+          trainerName: entry.trainerName,
           distance: distance,
+          carriedWeight: entry.weight,
           horseWeight: entry.horseWeight,
+          horseNo: entry.horseNo,
+          fieldSize: entries.length,
         ),
     };
   }
 
   /// 말 이력 조회 기간(일). 거리 적성 표본을 모으려면 1년보다 길어야 합니다.
   static const _horseHistoryDays = 730;
+
+  /// 과거 개발용 결과 생성기의 네 지문이 모두 있는 행만 제외합니다.
+  static bool _looksSyntheticResult(Map<String, dynamic> row) {
+    final raceTime = row['race_time']?.toString().trim() ?? '';
+    final s1fText = row['s1f']?.toString().trim() ?? '';
+    final g3fText = row['g3f']?.toString().trim() ?? '';
+    final passOrder = row['pass_order']?.toString().trim() ?? '';
+    final s1f = double.tryParse(s1fText) ?? -1;
+    final g3f = double.tryParse(g3fText) ?? -1;
+    return RegExp(r'^\d+:\d{2}\.\d{2}$').hasMatch(raceTime) &&
+        RegExp(r'^\d+(?:-\d+){3}$').hasMatch(passOrder) &&
+        RegExp(r'^\d+\.\d$').hasMatch(s1fText) &&
+        RegExp(r'^\d+\.\d$').hasMatch(g3fText) &&
+        s1f >= 12.5 &&
+        s1f <= 14.5 &&
+        g3f >= 36.0 &&
+        g3f <= 40.0;
+  }
 
   Future<List<Map<String, dynamic>>> _fetchPastRuns({
     required String column,
@@ -270,7 +320,8 @@ class SupabaseService {
             .from('race_results')
             .select(
               'meet,race_date,race_no,horse_no,horse_name,jockey_name,'
-              'rank,horse_weight,distance',
+              'trainer_name,rank,race_time,weight,horse_weight,distance,'
+              's1f,g3f,pass_order',
             )
             .inFilter(column, values)
             .gte('race_date', since)
@@ -374,6 +425,7 @@ class SupabaseService {
         .eq('meet', meet)
         .eq('race_date', raceDate)
         .eq('race_no', raceNo)
+        .eq('model_version', PredictionConstants.modelVersion)
         .order('created_at', ascending: false);
 
     final rows = _selectPredictionRows(_normalizeRows(data));

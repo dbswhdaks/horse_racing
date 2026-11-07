@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:horse_racing/core/constants/prediction_constants.dart';
+import 'package:horse_racing/core/services/entry_features.dart';
 import 'package:horse_racing/core/services/local_predictor.dart';
 import 'package:horse_racing/models/prediction.dart';
 import 'package:horse_racing/models/race_entry.dart';
@@ -131,5 +132,33 @@ void main() {
     expect(winRankOf[1]!, lessThan(winRankOf[2]!));
     expect(placeRankOf[2]!, lessThan(winRankOf[2]!));
     expect(placeRankOf[2]!, lessThan(3));
+  });
+
+  test('통과순위 이력이 있으면 레이팅 휴리스틱 대신 그 유형을 쓴다', () {
+    final report = LocalPredictor.generate(
+      meet: '1',
+      date: '20260904',
+      raceNo: 7,
+      entries: [
+        _entry(1, 90, 5),
+        _entry(2, 80, 3),
+        _entry(3, 70, 2),
+        _entry(4, 40, 0, totalRaces: 8),
+      ],
+      features: {
+        4: const EntryFeatureScores(
+          jockey: 0.5,
+          recentForm: 0.5,
+          fitness: 0.5,
+          trainer: 0.5,
+          combo: 0.5,
+          runningStyle: '선행',
+        ),
+      },
+    );
+
+    final closer = report.predictions.firstWhere((p) => p.horseNo == 4);
+    expect(closer.tags, contains('선행마'));
+    expect(closer.tags, isNot(contains('추입마')));
   });
 }

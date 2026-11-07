@@ -31,6 +31,7 @@ RACE_DATES = [
 
 HORSES = [f"말{i:02d}" for i in range(1, 15)]
 JOCKEYS = [f"기수{i:02d}" for i in range(1, 7)]
+TRAINERS = [f"조교사{i:02d}" for i in range(1, 5)]
 DISTANCES = [1000, 1200, 1400, 1600, 1800, 2000]
 
 
@@ -44,6 +45,13 @@ def _build_history(seed: int) -> list[dict]:
             rng.shuffle(runners)
             distance = rng.choice(DISTANCES)
             for rank, horse in enumerate(runners, start=1):
+                field = len(runners)
+                if rng.random() < 0.35:
+                    pass_order = ""
+                else:
+                    early = max(1, min(field, rank + rng.randint(-2, 2)))
+                    mid = max(1, min(field, rank + rng.randint(-1, 1)))
+                    pass_order = f"{early}-{mid}-{mid}-{rank}"
                 rows.append(
                     {
                         "meet": "1",
@@ -52,9 +60,13 @@ def _build_history(seed: int) -> list[dict]:
                         "horse_no": rank,
                         "horse_name": horse,
                         "jockey_name": rng.choice(JOCKEYS),
+                        "trainer_name": rng.choice(TRAINERS),
                         "rank": rank,
+                        "race_time": f"{distance / 1000 * 60 + rank * 0.2:.1f}",
+                        "weight": float(rng.randint(52, 58)),
                         "horse_weight": float(rng.randint(430, 530)),
                         "distance": distance,
+                        "pass_order": pass_order,
                     }
                 )
     return rows
@@ -68,28 +80,38 @@ def main() -> None:
     queries = []
     # 이력이 없는 경계(가장 이른 날짜, 미등록 말)도 함께 검증한다.
     fixed = [
-        ("20240105", HORSES[0], JOCKEYS[0], 1200, 480.0),
-        ("20990101", "없는말", "없는기수", 1400, 470.0),
-        ("20250425", HORSES[3], JOCKEYS[2], 2000, 500.0),
+        ("20240105", HORSES[0], JOCKEYS[0], TRAINERS[0], 1200, 480.0),
+        ("20990101", "없는말", "없는기수", "없는조교사", 1400, 470.0),
+        ("20250425", HORSES[3], JOCKEYS[2], TRAINERS[1], 2000, 500.0),
     ]
-    for race_date, horse, jockey, distance, weight in fixed:
+    for race_date, horse, jockey, trainer, distance, weight in fixed:
         queries.append(
             {
                 "race_date": race_date,
+                "meet": "1",
                 "horse_name": horse,
                 "jockey_name": jockey,
+                "trainer_name": trainer,
                 "distance": distance,
+                "carried_weight": 55.0,
                 "horse_weight": weight,
+                "horse_no": 4,
+                "field_size": 10,
             }
         )
     for _ in range(40):
         queries.append(
             {
                 "race_date": rng.choice(RACE_DATES),
+                "meet": "1",
                 "horse_name": rng.choice(HORSES),
                 "jockey_name": rng.choice(JOCKEYS),
+                "trainer_name": rng.choice(TRAINERS),
                 "distance": rng.choice(DISTANCES),
+                "carried_weight": float(rng.randint(52, 58)),
                 "horse_weight": float(rng.randint(430, 530)),
+                "horse_no": rng.randint(1, 10),
+                "field_size": 10,
             }
         )
 
@@ -103,6 +125,12 @@ def main() -> None:
                     "jockey": scores.jockey,
                     "recent_form": scores.recent_form,
                     "fitness": scores.fitness,
+                    "trainer": scores.trainer,
+                    "combo": scores.combo,
+                    "speed": scores.speed,
+                    "burden": scores.burden,
+                    "gate": scores.gate,
+                    "running_style": scores.running_style,
                 },
             }
         )
