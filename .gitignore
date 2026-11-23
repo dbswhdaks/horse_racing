@@ -48,4 +48,5 @@ app.*.map.json
 backend/.env
 *.jks
 *.keystore
+upload_certificate*.pem
 assets/config/runtime_secrets.json
