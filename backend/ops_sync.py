@@ -54,7 +54,10 @@ from tune_heuristic_predictions import (
     heuristic_params_from_dict,
 )
 
-API5_ODD_INFO = "/API5/oddInfo"
+# 기존 /API5/oddInfo 는 폐기됐다. API301 은 전 승식을 주지만 경주당 1,400건 가까이 되어
+# 단승·연승·복승만 저장한다 (나머지 승식은 결과 화면이 KRA 에서 직접 받는다).
+API301_DIVIDEND_TOTAL = "/API301/Dividend_rate_total"
+STORED_POOLS = ("WIN", "PLC", "QNL")
 
 
 def _parse_kra_item_list(data: dict) -> list[dict]:
@@ -75,22 +78,18 @@ def _parse_kra_item_list(data: dict) -> list[dict]:
     return []
 
 
-def fetch_odd_info_api5(
-    meet: str,
-    rc_date: str,
-    rc_no: int | None,
-) -> list[dict]:
-    """앱 `KraApiService.getOddInfo`와 동일: `/API5/oddInfo`, `rc_date` 8자리."""
+def fetch_odd_info(meet: str, rc_date: str, rc_no: int | None) -> list[dict]:
+    """앱 `KraApiService.getOddInfo`와 같은 API301 을 `_item_row_for_race` 형식으로 돌려준다."""
     if not KRA_SERVICE_KEY:
         raise RuntimeError("KRA_SERVICE_KEY 가 필요합니다.")
     base = (KRA_BASE_URL or "https://apis.data.go.kr/B551015").rstrip("/")
-    url = f"{base}{API5_ODD_INFO}"
     params: dict[str, Any] = {
         "ServiceKey": KRA_SERVICE_KEY,
         "_type": "json",
         "meet": str(meet),
         "pageNo": 1,
-        "numOfRows": 500,
+        # 한 경주에 삼쌍승 조합만 1,000건 가까이 된다.
+        "numOfRows": 3000,
     }
     if len(rc_date) == 8:
         params["rc_date"] = rc_date
@@ -98,9 +97,23 @@ def fetch_odd_info_api5(
         params["rc_no"] = rc_no
 
     with httpx.Client(timeout=45.0) as client:
-        resp = client.get(url, params=params)
+        resp = client.get(f"{base}{API301_DIVIDEND_TOTAL}", params=params)
         resp.raise_for_status()
-        return _parse_kra_item_list(resp.json())
+        items = _parse_kra_item_list(resp.json())
+
+    return [
+        {
+            "betType": it.get("pool"),
+            "hrNo1": it.get("chulNo"),
+            "hrNo2": it.get("chulNo2"),
+            "hrNo3": it.get("chulNo3"),
+            "bettRt": it.get("odds"),
+            "rcNo": it.get("rcNo"),
+            "rcDate": it.get("rcDate"),
+        }
+        for it in items
+        if it.get("pool") in STORED_POOLS
+    ]
 
 
 def _normalize_bet_type(raw: str) -> str:
@@ -260,7 +273,7 @@ def cmd_odds(args: argparse.Namespace) -> None:
             continue
 
         try:
-            items = fetch_odd_info_api5(meet, race_date, race_no)
+            items = fetch_odd_info(meet, race_date, race_no)
         except Exception as e:
             print(f"[odds] KRA 실패 {meet} {race_date} R{race_no}: {e}")
             time.sleep(args.sleep)

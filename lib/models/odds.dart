@@ -13,13 +13,14 @@ class Odds {
     required this.rate,
   });
 
-  factory Odds.fromJson(Map<String, dynamic> json) {
+  /// 확정배당율종합(API301) 한 줄. 순서무관 승식(QNL·QPL·TLA)은 출주번호 오름차순이다.
+  factory Odds.fromDividendJson(Map<String, dynamic> json) {
     return Odds(
-      betType: _str(json['betType'] ?? json['bettKindCd'] ?? ''),
-      horseNo1: _toInt(json['hrNo1'] ?? json['winHrsNo']),
-      horseNo2: _toInt(json['hrNo2'] ?? json['plcHrsNo']),
-      horseNo3: _toInt(json['hrNo3'] ?? json['trdHrsNo']),
-      rate: _toDouble(json['rate'] ?? json['bettRt']),
+      betType: json['pool']?.toString() ?? '',
+      horseNo1: _toInt(json['chulNo']),
+      horseNo2: _toInt(json['chulNo2']),
+      horseNo3: _toInt(json['chulNo3']),
+      rate: _toDouble(json['odds']),
     );
   }
 
@@ -42,7 +43,6 @@ class Odds {
     }
   }
 
-  static String _str(dynamic v) => v?.toString() ?? '';
   static int _toInt(dynamic v) {
     if (v == null) return 0;
     if (v is int) return v;

@@ -51,6 +51,9 @@ class RaceResultScreen extends ConsumerWidget {
     final oddsAsync = ref.watch(
       oddsProvider((meet: meet, date: date, raceNo: raceNo)),
     );
+    final dividendsAsync = ref.watch(
+      raceDividendsProvider((meet: meet, date: date, raceNo: raceNo)),
+    );
     final hasSubscription = ref.watch(
       inAppPurchaseProvider.select((state) => state.hasActiveSubscription),
     );
@@ -200,7 +203,11 @@ class RaceResultScreen extends ConsumerWidget {
                             ),
 
                     // 승식별 결과
-                    _BettingResultsSection(results: sorted),
+                    _BettingResultsSection(
+                      results: sorted,
+                      dividends: dividendsAsync.valueOrNull ?? const [],
+                      isLoading: dividendsAsync.isLoading,
+                    ),
 
                     // 레이스 타임 분석
                     _RaceTimeAnalysis(
@@ -1260,7 +1267,29 @@ class _CompRecommendation {
 
 class _BettingResultsSection extends StatelessWidget {
   final List<RaceResult> results;
-  const _BettingResultsSection({required this.results});
+  final List<Odds> dividends;
+  final bool isLoading;
+  const _BettingResultsSection({
+    required this.results,
+    required this.dividends,
+    required this.isLoading,
+  });
+
+  /// 적중 조합의 확정배당. 순서무관 승식은 [ordered] 를 false 로 넘긴다.
+  double? _dividend(String pool, List<int> horses, {bool ordered = true}) {
+    final sorted = ordered ? horses : ([...horses]..sort());
+    final key = [...sorted, 0, 0].take(3).toList();
+    for (final o in dividends) {
+      if (o.betType == pool &&
+          o.rate > 0 &&
+          o.horseNo1 == key[0] &&
+          o.horseNo2 == key[1] &&
+          o.horseNo3 == key[2]) {
+        return o.rate;
+      }
+    }
+    return null;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1269,22 +1298,22 @@ class _BettingResultsSection extends StatelessWidget {
     final r1 = results[0];
     final r2 = results[1];
     final r3 = results[2];
+    final n1 = r1.horseNo, n2 = r2.horseNo, n3 = r3.horseNo;
 
-    final w1 = r1.winOdds > 0 ? r1.winOdds : 3.0;
-    final w2 = r2.winOdds > 0 ? r2.winOdds : 5.0;
-    final w3 = r3.winOdds > 0 ? r3.winOdds : 8.0;
-    final p1 = r1.placeOdds > 0 ? r1.placeOdds : w1 * 0.4;
-    final p2 = r2.placeOdds > 0 ? r2.placeOdds : w2 * 0.4;
-    final p3 = r3.placeOdds > 0 ? r3.placeOdds : w3 * 0.4;
+    double? place(RaceResult r) =>
+        _dividend('PLC', [r.horseNo]) ?? (r.placeOdds > 0 ? r.placeOdds : null);
+    final win = _dividend('WIN', [n1]) ?? (r1.winOdds > 0 ? r1.winOdds : null);
+    final quinella = _dividend('QNL', [n1, n2], ordered: false);
+    final exacta = _dividend('EXA', [n1, n2]);
+    final trio = _dividend('TLA', [n1, n2, n3], ordered: false);
+    final trifecta = _dividend('TRI', [n1, n2, n3]);
+    double? quinellaPlace(int a, int b) =>
+        _dividend('QPL', [a, b], ordered: false);
 
-    final quinella = (w1 * w2 * 0.35).clamp(2.0, 9999.0);
-    final exacta = (w1 * w2 * 0.7).clamp(3.0, 9999.0);
-    final quinellaPlace = ((p1 + p2 + p3) / 3 * 1.2).clamp(1.5, 9999.0);
-    final trifecta = (w1 * w2 * w3 * 0.05).clamp(5.0, 99999.0);
-    final trio = (w1 * w2 * w3 * 0.15).clamp(10.0, 99999.0);
-
-    String fmt(double v) =>
-        v >= 100 ? '${v.toStringAsFixed(0)}배' : '${v.toStringAsFixed(1)}배';
+    String fmt(double? v) {
+      if (v == null) return isLoading ? '…' : '-';
+      return v >= 100 ? '${v.toStringAsFixed(0)}배' : '${v.toStringAsFixed(1)}배';
+    }
 
     final bets = [
       _Bet(
@@ -1293,14 +1322,14 @@ class _BettingResultsSection extends StatelessWidget {
         Icons.looks_one_rounded,
         AppTheme.winColor,
         '${r1.horseNo}번 ${r1.horseName}',
-        fmt(w1),
+        fmt(win),
       ),
       _Bet(
         '연승식',
         '3등 안에 들기',
         Icons.format_list_numbered_rounded,
         AppTheme.placeColor,
-        '${r1.horseNo}번 ${fmt(p1)} / ${r2.horseNo}번 ${fmt(p2)} / ${r3.horseNo}번 ${fmt(p3)}',
+        '$n1번 ${fmt(place(r1))} / $n2번 ${fmt(place(r2))} / $n3번 ${fmt(place(r3))}',
         '',
       ),
       _Bet(
@@ -1324,24 +1353,26 @@ class _BettingResultsSection extends StatelessWidget {
         '3등 안에 두 마리',
         Icons.people_rounded,
         const Color(0xFF66BB6A),
-        '${r1.horseNo}·${r2.horseNo}, ${r1.horseNo}·${r3.horseNo}, ${r2.horseNo}·${r3.horseNo}',
-        fmt(quinellaPlace),
+        '$n1·$n2 ${fmt(quinellaPlace(n1, n2))} / '
+            '$n1·$n3 ${fmt(quinellaPlace(n1, n3))} / '
+            '$n2·$n3 ${fmt(quinellaPlace(n2, n3))}',
+        '',
       ),
       _Bet(
         '삼복승식',
         '순서무관 1·2·3등',
         Icons.groups_rounded,
         const Color(0xFFAB47BC),
-        '${r1.horseNo} + ${r2.horseNo} + ${r3.horseNo}번',
-        fmt(trifecta),
+        '$n1 + $n2 + $n3번',
+        fmt(trio),
       ),
       _Bet(
         '삼쌍승식',
         '순서대로 1→2→3등',
         Icons.military_tech_rounded,
         const Color(0xFFFF7043),
-        '${r1.horseNo} → ${r2.horseNo} → ${r3.horseNo}번',
-        fmt(trio),
+        '$n1 → $n2 → $n3번',
+        fmt(trifecta),
       ),
     ];
 

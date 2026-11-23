@@ -8,7 +8,9 @@ class DioClient {
       Dio(
           BaseOptions(
             baseUrl: ApiConstants.baseUrl,
-            connectTimeout: const Duration(seconds: 20),
+            // 웹에서는 응답 헤더를 받을 때까지가 connectTimeout 에 포함되는데,
+            // KRA 는 첫 바이트까지 30초 넘게 걸리기도 한다.
+            connectTimeout: const Duration(seconds: 45),
             receiveTimeout: const Duration(seconds: 45),
             queryParameters: {
               'ServiceKey': ApiConstants.serviceKey,

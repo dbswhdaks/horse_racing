@@ -64,12 +64,11 @@ final racePlanProvider =
       );
       if (races.isNotEmpty) return races;
 
+      // 실패를 빈 목록으로 삼키면 화면에 "경주 없음" 으로 보이므로 오류를 그대로 올린다.
       final kra = ref.read(kraApiServiceProvider);
-      return _withTimeout<List<Race>>(
-        kra.getRacePlan(meet: params.meet, rcDate: params.date),
-        const Duration(seconds: 5),
-        const [],
-      );
+      return kra
+          .getRacePlan(meet: params.meet, rcDate: params.date)
+          .timeout(const Duration(seconds: 60));
     });
 
 // ── Entries: Supabase first → KRA API fallback ──
@@ -124,24 +123,44 @@ raceStartListProvider =
         return entries;
       }
 
-      final kra = ref.read(kraApiServiceProvider);
-      final kraEntries = await _withTimeout<List<RaceEntry>>(
-        kra.getRaceStartList(
-          meet: params.meet,
-          rcDate: params.date,
-          rcNo: params.raceNo,
-        ),
-        const Duration(seconds: 6),
-        const [],
-      );
-      if (kraEntries.isNotEmpty) {
-        debugPrint(
-          '[ENTRIES] KRA API에서 ${kraEntries.length}건 로드 '
-          '(첫 항목: ${kraEntries.first.horseNo}번 ${kraEntries.first.horseName} '
-          '기수=${kraEntries.first.jockeyName})',
-        );
+      final kraDayProvider = _kraDayEntriesProvider((
+        meet: params.meet,
+        date: params.date,
+      ));
+      try {
+        final dayEntries = await ref.read(kraDayProvider.future);
+        // 아직 출전표가 공개되지 않은 날짜는 나중에 다시 받아야 한다.
+        if (dayEntries.isEmpty) ref.invalidate(kraDayProvider);
+        final kraEntries = params.raceNo == null
+            ? dayEntries
+            : dayEntries.where((e) => e.raceNo == params.raceNo).toList();
+        if (kraEntries.isNotEmpty) {
+          debugPrint(
+            '[ENTRIES] KRA API에서 ${kraEntries.length}건 로드 '
+            '(첫 항목: ${kraEntries.first.horseNo}번 ${kraEntries.first.horseName} '
+            '기수=${kraEntries.first.jockeyName})',
+          );
+        }
+        return kraEntries;
+      } catch (_) {
+        // 실패가 캐시에 남으면 '다시 시도' 해도 KRA 를 다시 부르지 않는다.
+        ref.invalidate(kraDayProvider);
+        rethrow;
       }
-      return kraEntries;
+    });
+
+// ── KRA 하루치 출전표 ──
+// API26_2 도 rc_no 를 무시하고 하루치 전체를 돌려주므로 날짜별로 한 번만 받는다.
+
+final _kraDayEntriesProvider =
+    FutureProvider.family<List<RaceEntry>, ({String meet, String? date})>((
+      ref,
+      params,
+    ) {
+      return ref
+          .read(kraApiServiceProvider)
+          .getRaceStartList(meet: params.meet, rcDate: params.date)
+          .timeout(const Duration(seconds: 60));
     });
 
 // ── 경주별 두수: 날짜 전체 출전표에서 경주별 카운트 ──
@@ -164,6 +183,21 @@ final raceHeadCountProvider =
         counts[e.raceNo] = (counts[e.raceNo] ?? 0) + 1;
       }
       return counts;
+    });
+
+// ── KRA 하루치 경주결과 ──
+// API155 는 race_no 를 무시하고 하루치 전체를 돌려주며 응답이 6~30초 이상으로
+// 들쭉날쭉하므로, 날짜별로 한 번만 받아 경주마다 나눠 쓴다.
+
+final _kraDayResultsProvider =
+    FutureProvider.family<List<RaceResult>, ({String meet, String? date})>((
+      ref,
+      params,
+    ) {
+      return ref
+          .read(kraApiServiceProvider)
+          .getRaceResult(meet: params.meet, rcDate: params.date)
+          .timeout(const Duration(seconds: 60));
     });
 
 // ── Results: Supabase first → KRA API fallback ──
@@ -227,19 +261,27 @@ final raceResultProvider =
         }
       }
 
-      // 3) KRA API fallback
-      final kra = ref.read(kraApiServiceProvider);
+      // 3) KRA API fallback — 하루치 캐시에서 해당 경주만 골라낸다.
+      final dayProvider = _kraDayResultsProvider((
+        meet: params.meet,
+        date: params.date,
+      ));
+      List<RaceResult> pickRace(List<RaceResult> dayResults) =>
+          params.raceNo == null
+          ? dayResults
+          : dayResults.where((r) => r.raceNo == params.raceNo).toList();
       try {
-        final results = await kra
-            .getRaceResult(
-              meet: params.meet,
-              rcDate: params.date,
-              rcNo: params.raceNo,
-            )
-            .timeout(const Duration(seconds: 6));
+        var results = pickRace(await ref.read(dayProvider.future));
+        // 당일 경주는 캐시를 받은 뒤에 결과가 확정될 수 있다.
+        if (results.isEmpty) {
+          ref.invalidate(dayProvider);
+          results = pickRace(await ref.read(dayProvider.future));
+        }
         debugPrint('[RESULT] KRA API: ${results.length}건');
         if (results.isNotEmpty) return results;
       } catch (e) {
+        // 실패가 캐시에 남으면 '다시 시도' 해도 KRA 를 다시 부르지 않는다.
+        ref.invalidate(dayProvider);
         debugPrint('[RESULT] KRA API 실패: $e');
       }
 
@@ -273,10 +315,27 @@ final oddsProvider =
           rcDate: params.date,
           rcNo: params.raceNo,
         ),
-        const Duration(seconds: 6),
+        const Duration(seconds: 20),
         const [],
       );
     });
+
+// ── 전 승식 확정배당: 결과 화면 전용 ──
+// Supabase odds 에는 단승·연승·복승만 저장하므로 쌍승·삼쌍승 등은 KRA 에서 바로 받는다.
+
+final raceDividendsProvider =
+    FutureProvider.family<List<Odds>, ({String meet, String date, int raceNo})>(
+      (ref, params) {
+        return ref
+            .read(kraApiServiceProvider)
+            .getOddInfo(
+              meet: params.meet,
+              rcDate: params.date,
+              rcNo: params.raceNo,
+            )
+            .timeout(const Duration(seconds: 60));
+      },
+    );
 
 // ── Predictions: 동일 버전 Supabase → 검증된 Local → 운영 ML fallback ──
 
@@ -294,6 +353,8 @@ final predictionProvider =
           raceNo: params.raceNo,
         )).future,
       );
+      // await 전에 실패해도 미처리 오류로 보고되지 않게 한다 (await 시점에는 그대로 받는다).
+      entriesFuture.ignore();
       // 화면과 같은 provider를 공유해 Supabase/KRA 배당 요청이 두 번 나가지 않게 한다.
       final oddsFuture = ref.read(
         oddsProvider((

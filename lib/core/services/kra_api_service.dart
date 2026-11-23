@@ -15,7 +15,12 @@ class KraApiService {
     String? rcDate,
     String? rcMonth,
   }) async {
-    final params = <String, dynamic>{'meet': meet};
+    // numOfRows 를 생략하면 KRA 가 10건만 돌려줘 11경주가 잘린다.
+    final params = <String, dynamic>{
+      'meet': meet,
+      'pageNo': 1,
+      'numOfRows': 500,
+    };
     if (rcDate != null) params['rc_date'] = rcDate;
     if (rcMonth != null) params['rc_month'] = rcMonth;
 
@@ -36,6 +41,8 @@ class KraApiService {
       final monthParam = rcDate.substring(0, 6);
       final monthResponse = await _get(ApiConstants.racePlanPath, {
         'meet': meet,
+        'pageNo': 1,
+        'numOfRows': 500,
         'rc_month': monthParam,
       });
       if (monthResponse != null) {
@@ -67,7 +74,9 @@ class KraApiService {
     if (rcNo != null) params['rc_no'] = rcNo;
 
     final response = await _get(ApiConstants.raceStartListPath, params);
-    if (response == null) return [];
+    if (response == null) {
+      throw Exception('출전표 서버 연결에 실패했습니다. 잠시 후 다시 시도해주세요.');
+    }
 
     // 첫 아이템의 필드명과 주요 값을 디버그 로그로 출력
     final rawItems = response.data?['response']?['body']?['items']?['item'];
@@ -162,19 +171,20 @@ class KraApiService {
     String? rcDate,
     int? rcNo,
   }) async {
+    // 한 경주에 삼쌍승 조합만 1,000건 가까이 되므로 경주 하나를 한 번에 받는다.
     final params = <String, dynamic>{
       'meet': meet,
       'pageNo': 1,
-      'numOfRows': 500,
+      'numOfRows': 3000,
     };
     if (rcDate != null && rcDate.length == 8) {
       params['rc_date'] = rcDate;
     }
     if (rcNo != null) params['rc_no'] = rcNo;
 
-    final response = await _get(ApiConstants.oddInfoPath, params);
+    final response = await _get(ApiConstants.dividendRateTotalPath, params);
     if (response == null) return [];
-    return _parseList(response, (json) => Odds.fromJson(json));
+    return _parseList(response, Odds.fromDividendJson);
   }
 
   Future<Response?> _get(String path, Map<String, dynamic> params) async {

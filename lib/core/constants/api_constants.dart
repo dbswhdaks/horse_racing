@@ -15,8 +15,9 @@ class ApiConstants {
   // API155: 경주결과 (AI학습용)
   static const String raceResultPath = '/API155/raceResult';
 
-  // API5: 복승식 확정배당율
-  static const String oddInfoPath = '/API5/oddInfo';
+  // API301: 경마시행당일 확정배당율종합 — 전 승식(WIN·PLC·QNL·EXA·QPL·TLA·TRI)
+  // (기존 /API5/oddInfo 는 폐기됨)
+  static const String dividendRateTotalPath = '/API301/Dividend_rate_total';
 
   // API155: AI학습용 경주결과
   static const String aiRaceResultPath = '/API155/raceResult';
@@ -29,7 +30,7 @@ class ApiConstants {
 
   // racedetailresult: 경주별 상세성적표
   static const String raceDetailResultPath =
-      '/racedetailresult/raceDetailResult';
+      '/racedetailresult/getracedetailresult';
 
   static const String mlBackendUrl = 'http://localhost:8000';
 

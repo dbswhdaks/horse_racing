@@ -414,15 +414,14 @@ class _RaceListTabState extends ConsumerState<_RaceListTab> {
       date: race.raceDate,
       raceNo: race.raceNo,
     );
-    unawaited(ref.read(raceStartListProvider(entryParams).future));
-    unawaited(ref.read(raceHorseStatsProvider(entryParams).future));
-    unawaited(ref.read(oddsProvider(entryParams).future));
-    unawaited(ref.read(predictionProvider(entryParams).future));
-    unawaited(
-      ref.read(
-        racePlanProvider((meet: widget.meet, date: race.raceDate)).future,
-      ),
-    );
+    // 미리 받아 두기만 하므로 실패는 해당 화면에서 오류로 표시된다.
+    ref.read(raceStartListProvider(entryParams).future).ignore();
+    ref.read(raceHorseStatsProvider(entryParams).future).ignore();
+    ref.read(oddsProvider(entryParams).future).ignore();
+    ref.read(predictionProvider(entryParams).future).ignore();
+    ref
+        .read(racePlanProvider((meet: widget.meet, date: race.raceDate)).future)
+        .ignore();
   }
 
   void _openEntryDetail(Race race, BuildContext context) {

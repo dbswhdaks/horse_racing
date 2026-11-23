@@ -13,6 +13,19 @@ on:
     - cron: "0 0,3 * * 5,6,0"
 
 jobs:
+  # 공개 저장소는 60일간 커밋이 없으면 예약 실행이 자동으로 꺼진다.
+  # enable API 를 호출하면 비활성 타이머가 초기화되므로 다른 잡의 성패와
+  # 무관하게 매번 실행한다.
+  keepalive:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - name: Reset scheduled-workflow inactivity timer
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/ops-sync.yml/enable"
+
   # 이후 모든 단계가 `races` 테이블을 기준으로 대상 경주를 고른다. 이 잡이 없으면
   # 일정이 갱신되지 않아 배당·예측이 조용히 0건으로 통과한다.
   races:
