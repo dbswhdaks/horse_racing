@@ -79,7 +79,7 @@ class KraApiService {
     }
 
     // 첫 아이템의 필드명과 주요 값을 디버그 로그로 출력
-    final rawItems = response.data?['response']?['body']?['items']?['item'];
+    final rawItems = _rawItems(response.data);
     if (rawItems is List && rawItems.isNotEmpty) {
       final first = rawItems.first;
       if (first is Map) {
@@ -138,7 +138,7 @@ class KraApiService {
       );
 
       // 첫 아이템의 모든 필드명을 로깅하여 마체중/배당률 키를 파악한다.
-      final rawItems = body['response']?['body']?['items']?['item'];
+      final rawItems = _rawItems(body);
       if (rawItems is List && rawItems.isNotEmpty) {
         final first = rawItems.first;
         if (first is Map) {
@@ -242,12 +242,7 @@ class KraApiService {
       return [];
     }
 
-    final body = root['response']?['body'];
-    if (body == null) return [];
-
-    final items = body['items']?['item'];
-    if (items == null) return [];
-
+    final items = _rawItems(root);
     if (items is List) {
       return items
           .whereType<Map<String, dynamic>>()
@@ -258,5 +253,16 @@ class KraApiService {
     }
 
     return [];
+  }
+
+  /// `response.body.items.item` 을 꺼낸다. 데이터가 없는 날 KRA 는 `items` 를
+  /// 빈 문자열로 주므로 단계마다 Map 인지 확인해야 한다.
+  static dynamic _rawItems(dynamic root) {
+    dynamic node = root;
+    for (final key in const ['response', 'body', 'items', 'item']) {
+      if (node is! Map) return null;
+      node = node[key];
+    }
+    return node;
   }
 }

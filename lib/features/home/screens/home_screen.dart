@@ -181,7 +181,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     }
   }
 
-  void _share(String dateStr) {
+  Future<void> _share(String dateStr) async {
+    final messenger = ScaffoldMessenger.of(context);
     final meet = _meetLabels[_tabController.index];
     final date = formatDateParam(ref.read(selectedDateProvider));
     final racesAsync = ref.read(
@@ -208,9 +209,31 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       }
     }
 
-    text.writeln('\n경마 Plus 앱에서 확인하세요!');
-    SharePlus.instance.share(ShareParams(text: text.toString()));
+    // 받는 사람이 바로 열 수 있도록 웹과 Play 스토어 링크를 함께 보낸다.
+    text
+      ..writeln('\n경마 Plus 에서 확인하세요!')
+      ..writeln('웹: $_webUrl')
+      ..writeln('앱: $_playStoreUrl');
+
+    try {
+      final result = await SharePlus.instance.share(
+        ShareParams(text: text.toString(), subject: '경마 Plus - $meet 경마'),
+      );
+      if (result.status == ShareResultStatus.unavailable) {
+        messenger.showSnackBar(
+          const SnackBar(content: Text('이 기기에서는 공유 기능을 사용할 수 없습니다.')),
+        );
+      }
+    } catch (_) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('공유하지 못했습니다. 잠시 후 다시 시도해주세요.')),
+      );
+    }
   }
+
+  static const _webUrl = 'https://horse.it.kr/';
+  static const _playStoreUrl =
+      'https://play.google.com/store/apps/details?id=com.horseracingplus.app';
 }
 
 // ── 햄버거(엔드) 드로어 ──
