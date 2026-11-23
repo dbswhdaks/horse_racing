@@ -58,6 +58,7 @@ from tune_heuristic_predictions import (
 # 단승·연승·복승만 저장한다 (나머지 승식은 결과 화면이 KRA 에서 직접 받는다).
 API301_DIVIDEND_TOTAL = "/API301/Dividend_rate_total"
 STORED_POOLS = ("WIN", "PLC", "QNL")
+KRA_MAX_ATTEMPTS = 3
 
 
 def _parse_kra_item_list(data: dict) -> list[dict]:
@@ -96,10 +97,18 @@ def fetch_odd_info(meet: str, rc_date: str, rc_no: int | None) -> list[dict]:
     if rc_no is not None and rc_no > 0:
         params["rc_no"] = rc_no
 
-    with httpx.Client(timeout=45.0) as client:
-        resp = client.get(f"{base}{API301_DIVIDEND_TOTAL}", params=params)
-        resp.raise_for_status()
-        items = _parse_kra_item_list(resp.json())
+    # KRA 는 SSL 핸드셰이크 단계에서 간헐적으로 타임아웃이 난다.
+    for attempt in range(1, KRA_MAX_ATTEMPTS + 1):
+        try:
+            with httpx.Client(timeout=45.0) as client:
+                resp = client.get(f"{base}{API301_DIVIDEND_TOTAL}", params=params)
+                resp.raise_for_status()
+                items = _parse_kra_item_list(resp.json())
+            break
+        except httpx.TransportError:
+            if attempt == KRA_MAX_ATTEMPTS:
+                raise
+            time.sleep(3 * attempt)
 
     return [
         {
@@ -135,24 +144,36 @@ def _normalize_bet_type(raw: str) -> str:
     return s
 
 
-def _races_with_prerace_odds(client: Any) -> set[tuple[str, str, int]]:
-    """이미 사전 배당 스냅샷을 가진 경주 키 집합.
+RaceKey = tuple[str, str, int]
 
-    사후 확정 배당으로 덮어써 스냅샷을 잃지 않도록 재수집에서 제외한다.
+
+def _race_key(row: dict) -> RaceKey:
+    return (
+        str(row.get("meet", "")),
+        str(row.get("race_date", "")),
+        _safe_int(row.get("race_no", 0), 0),
+    )
+
+
+def _odds_capture_status(client: Any) -> tuple[set[RaceKey], set[RaceKey]]:
+    """(사전 배당 스냅샷이 있는 경주, 확정 배당이 있는 경주) 키 집합.
+
+    사전 스냅샷은 사후 확정 배당으로 덮어써 잃지 않도록, 확정 배당은 다시 받아도
+    값이 같으므로 재수집에서 제외한다.
     """
     rows = _fetch_all_rows(
         client, "odds", "meet,race_date,race_no,bet_type,captured_at"
     )
-    keys: set[tuple[str, str, int]] = set()
+    prerace: set[RaceKey] = set()
+    confirmed: set[RaceKey] = set()
     for row in rows:
         if str(row.get("bet_type", "")).upper() != "WIN":
             continue
-        race_date = str(row.get("race_date", ""))
-        if _is_prerace_capture(row.get("captured_at"), race_date):
-            keys.add(
-                (str(row.get("meet", "")), race_date, _safe_int(row.get("race_no", 0)))
-            )
-    return keys
+        if _is_prerace_capture(row.get("captured_at"), str(row.get("race_date", ""))):
+            prerace.add(_race_key(row))
+        else:
+            confirmed.add(_race_key(row))
+    return prerace, confirmed
 
 
 def _item_row_for_race(
@@ -242,23 +263,22 @@ def cmd_odds(args: argparse.Namespace) -> None:
         since=args.since,
         until=args.until,
         on=args.on,
-        max_races=args.max_races,
+        max_races=0,
     )
 
-    protected = set() if args.overwrite_prerace else _races_with_prerace_odds(client)
-    if protected:
-        before = len(keys)
-        keys = [
-            r
-            for r in keys
-            if (
-                str(r.get("meet", "")),
-                str(r.get("race_date", "")),
-                _safe_int(r.get("race_no", 0), 0),
-            )
-            not in protected
-        ]
-        print(f"[odds] 사전 배당이 이미 있는 경주 {before - len(keys)}건 제외")
+    prerace, confirmed = _odds_capture_status(client)
+    skip: set[RaceKey] = set()
+    if not args.overwrite_prerace:
+        skip |= prerace
+    if not args.refetch_confirmed:
+        skip |= confirmed
+    before = len(keys)
+    keys = [r for r in keys if _race_key(r) not in skip]
+    print(f"[odds] 배당이 이미 저장된 경주 {before - len(keys)}건 제외")
+    # 상한은 남은 경주에 적용해야 매 실행마다 최근 경주만 되풀이하지 않고
+    # 오래된 누락분까지 차례로 채운다.
+    if args.max_races > 0:
+        keys = keys[: args.max_races]
 
     print(
         f"[odds] 대상 경주: {len(keys)}건 (on={args.on}, since={args.since}, until={args.until}, meet={args.meet})"
@@ -515,7 +535,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Supabase KRA/휴리스틱 동기화")
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    p_odds = sub.add_parser("odds", help="KRA API5 배당 → Supabase odds")
+    p_odds = sub.add_parser("odds", help="KRA API301 확정배당 → Supabase odds")
     p_odds.add_argument("--meet", default=None, help="1/2/3")
     p_odds.add_argument(
         "--since", default=None, help="races.race_date >= since (on 미지정시)"
@@ -542,6 +562,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--overwrite-prerace",
         action="store_true",
         help="이미 사전 배당이 저장된 경주도 다시 수집(기본값: 보존)",
+    )
+    p_odds.add_argument(
+        "--refetch-confirmed",
+        action="store_true",
+        help="이미 확정 배당이 저장된 경주도 다시 수집(기본값: 건너뜀)",
     )
     p_odds.set_defaults(func=cmd_odds)
 
