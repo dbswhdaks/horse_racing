@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:horse_racing/core/constants/prediction_constants.dart';
 import 'package:horse_racing/core/services/entry_features.dart';
 import 'package:horse_racing/core/services/local_predictor.dart';
+import 'package:horse_racing/models/odds.dart';
 import 'package:horse_racing/models/prediction.dart';
 import 'package:horse_racing/models/race_entry.dart';
 
@@ -100,6 +101,68 @@ void main() {
     }
   });
 
+  test('정보가 없고 전체 배당이 있으면 시장 내재 확률을 사용한다', () {
+    final entries = List.generate(
+      5,
+      (index) => _entry(
+        index + 1,
+        0,
+        0,
+      ).copyWith(totalRaces: 0, totalPrize: 0, recentPrize: 0, horseWeight: 0),
+    );
+    final rates = [2.0, 4.0, 8.0, 16.0, 16.0];
+    final odds = List.generate(
+      rates.length,
+      (index) => Odds(
+        betType: 'WIN',
+        horseNo1: index + 1,
+        horseNo2: 0,
+        horseNo3: 0,
+        rate: rates[index],
+      ),
+    );
+
+    final report = LocalPredictor.generate(
+      meet: '1',
+      date: '20260813',
+      raceNo: 4,
+      entries: entries,
+      odds: odds,
+    );
+
+    expect(report.isUniformDistribution, isFalse);
+    expect(report.predictions.first.horseNo, 1);
+    expect(report.predictions.first.winProbability, 50);
+  });
+
+  test('정보가 없고 배당이 일부만 있으면 누락마 왜곡 없이 균등 확률을 쓴다', () {
+    final entries = List.generate(
+      5,
+      (index) => _entry(
+        index + 1,
+        0,
+        0,
+      ).copyWith(totalRaces: 0, totalPrize: 0, recentPrize: 0, horseWeight: 0),
+    );
+    final partialOdds = [
+      Odds(betType: 'WIN', horseNo1: 1, horseNo2: 0, horseNo3: 0, rate: 2),
+      Odds(betType: 'WIN', horseNo1: 2, horseNo2: 0, horseNo3: 0, rate: 4),
+    ];
+
+    final report = LocalPredictor.generate(
+      meet: '1',
+      date: '20260813',
+      raceNo: 5,
+      entries: entries,
+      odds: partialOdds,
+    );
+
+    expect(report.isUniformDistribution, isTrue);
+    for (final prediction in report.predictions) {
+      expect(prediction.winProbability, 20);
+    }
+  });
+
   test('안정 입상마는 단승보다 입상 순위에서 앞선다', () {
     final report = LocalPredictor.generate(
       meet: '1',
@@ -107,10 +170,12 @@ void main() {
       raceNo: 5,
       entries: [
         _entry(1, 92, 6, places: 0),
-        _entry(2, 68, 0, places: 8).copyWith(
-          totalPrize: 420000,
-          recentPrize: 90000,
-        ),
+        _entry(
+          2,
+          68,
+          0,
+          places: 8,
+        ).copyWith(totalPrize: 420000, recentPrize: 90000),
         _entry(3, 86, 4, places: 0),
         _entry(4, 82, 3, places: 1),
         _entry(5, 60, 1, places: 0),
@@ -118,7 +183,8 @@ void main() {
       ],
     );
 
-    final byWin = [...report.predictions]..sort(Prediction.compareByWinThenPlace);
+    final byWin = [...report.predictions]
+      ..sort(Prediction.compareByWinThenPlace);
     final byPlace = [...report.predictions]
       ..sort(Prediction.compareByPlaceThenWin);
 

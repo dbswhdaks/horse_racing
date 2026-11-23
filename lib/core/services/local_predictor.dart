@@ -119,24 +119,25 @@ class LocalPredictor {
       odds: odds,
       entryHorseNos: entries.map((e) => e.horseNo).toSet(),
     );
+    final hasCompleteMarket = marketByHorse.length == entries.length;
     var marketWeight = _effectiveMarketWeight(
       fieldSize: entries.length,
       marketByHorse: marketByHorse,
     );
 
-    // 출주표(rating/totalRaces 등)가 비어 base 점수의 분산이 거의 없을 때,
-    // 시장(배당) 가중을 자동으로 크게 올려 균등 분포(1/N)를 피한다.
+    // 출주표(rating/totalRaces 등)가 비어 base 점수의 분산이 거의 없는 경주.
     final fundamentalSignalAbsent =
         (maxRating - minRating).abs() < 1e-6 &&
         entries.every((e) => e.totalRaces == 0) &&
         (maxPrize - minPrize).abs() < 1e-6;
-    if (fundamentalSignalAbsent && marketByHorse.length >= 2) {
-      marketWeight = 0.9;
+    final useMarketOnly = fundamentalSignalAbsent && hasCompleteMarket;
+    if (fundamentalSignalAbsent && !hasCompleteMarket) {
+      marketWeight = 0.0;
     }
 
-    // 기초 지표·시장 신호가 모두 없으면 정직하게 1/N 확률을 표시합니다.
-    final isUniformDistribution =
-        fundamentalSignalAbsent && marketByHorse.length < 2;
+    // 일부 말의 배당만 있으면 누락마를 왜곡할 수 있으므로 시장 단독 예측을
+    // 만들지 않고 정직하게 1/N 확률을 표시합니다.
+    final isUniformDistribution = fundamentalSignalAbsent && !useMarketOnly;
 
     for (final entry in entries) {
       final style = styles[entry.horseNo] ?? '중단';
@@ -265,36 +266,50 @@ class LocalPredictor {
       };
     }
 
-    // 안정적 소프트맥스: max-shift + 동적 temperature
-    final maxRaw = rawScores.reduce(max);
-    final minRaw = rawScores.reduce(min);
-    final spread = maxRaw - minRaw;
-    final temperature = _calcTemperature(
-      entries.length,
-      spread,
-      _params.tempScale,
-    );
-    final expScores = rawScores
-        .map((s) => exp((s - maxRaw) / temperature))
-        .toList();
-    final sumExp = expScores.fold(0.0, (a, b) => a + b);
-    final probabilities = expScores.map((e) => (e / sumExp) * 100).toList();
+    late final List<double> probabilities;
+    late final List<double> placeProbabilities;
+    if (useMarketOnly) {
+      // 기초 정보가 전혀 없을 때는 스케일이 다른 휴리스틱 점수와 섞지 않고
+      // 완전한 단승 배당의 내재 확률을 그대로 사용합니다.
+      final marketProbabilities = entries
+          .map((entry) => marketByHorse[entry.horseNo]!)
+          .toList();
+      probabilities = marketProbabilities.map((p) => p * 100).toList();
+      placeProbabilities = harvillePlaceProbs(
+        marketProbabilities,
+      ).map((p) => p * 100).toList();
+    } else {
+      // 안정적 소프트맥스: max-shift + 동적 temperature
+      final maxRaw = rawScores.reduce(max);
+      final minRaw = rawScores.reduce(min);
+      final spread = maxRaw - minRaw;
+      final temperature = _calcTemperature(
+        entries.length,
+        spread,
+        _params.tempScale,
+      );
+      final expScores = rawScores
+          .map((s) => exp((s - maxRaw) / temperature))
+          .toList();
+      final sumExp = expScores.fold(0.0, (a, b) => a + b);
+      probabilities = expScores.map((e) => (e / sumExp) * 100).toList();
 
-    // 입상 확률은 단승과 다른 점수·온도의 분포에서 Harville 공식으로 유도합니다.
-    final maxPlaceRaw = placeRawScores.reduce(max);
-    final minPlaceRaw = placeRawScores.reduce(min);
-    final placeSpread = maxPlaceRaw - minPlaceRaw;
-    final placeTemperature = _calcTemperature(
-      entries.length,
-      placeSpread,
-      _params.placeTempScale,
-    );
-    final placeExpScores = placeRawScores
-        .map((s) => exp((s - maxPlaceRaw) / placeTemperature))
-        .toList();
-    final placeProbabilities = harvillePlaceProbs(
-      placeExpScores,
-    ).map((v) => v * 100).toList();
+      // 입상 확률은 단승과 다른 점수·온도의 분포에서 Harville 공식으로 유도합니다.
+      final maxPlaceRaw = placeRawScores.reduce(max);
+      final minPlaceRaw = placeRawScores.reduce(min);
+      final placeSpread = maxPlaceRaw - minPlaceRaw;
+      final placeTemperature = _calcTemperature(
+        entries.length,
+        placeSpread,
+        _params.placeTempScale,
+      );
+      final placeExpScores = placeRawScores
+          .map((s) => exp((s - maxPlaceRaw) / placeTemperature))
+          .toList();
+      placeProbabilities = harvillePlaceProbs(
+        placeExpScores,
+      ).map((v) => v * 100).toList();
+    }
 
     for (int i = 0; i < entries.length; i++) {
       final entry = entries[i];

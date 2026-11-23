@@ -639,8 +639,40 @@ def _race_probabilities(
     market_by = _market_implied_by_win_odds(win_odds or {}, entry_horse_nos)
     field = len(entries)
     coverage = (len(market_by) / field) if field > 0 else 0.0
+    fundamental_signal_absent = (
+        abs(max_rating - min_rating) < 1e-6
+        and all(_safe_int(e.get("total_races", 0)) == 0 for e in entries)
+        and abs(max_prize - min_prize) < 1e-6
+    )
+    if fundamental_signal_absent and coverage == 1.0:
+        # 앱 LocalPredictor 와 같이 기초 정보가 없으면 완전한 단승 배당의
+        # 내재 확률을 그대로 쓴다.
+        market_probs = [
+            market_by[_safe_int(e.get("horse_no", 0))] for e in entries
+        ]
+        market_place_probs = _harville_place_probs(market_probs, slots=PLACE_SLOTS)
+        rows = [
+            {
+                "horse_no": _safe_int(e.get("horse_no", 0)),
+                "horse_name": str(e.get("horse_name", "")),
+                "win_probability": market_probs[i] * 100.0,
+                "place_probability": market_place_probs[i] * 100.0,
+                "rank": 0,
+            }
+            for i, e in enumerate(entries)
+        ]
+        rows.sort(key=_win_order_key)
+        for rank, row in enumerate(rows, start=1):
+            row["rank"] = rank
+        return rows
+
     market_w = 0.0
-    if coverage >= 0.35 and params.w_market > 0.0 and market_by:
+    if (
+        not fundamental_signal_absent
+        and coverage >= 0.35
+        and params.w_market > 0.0
+        and market_by
+    ):
         market_w = max(0.0, min(1.0, params.w_market * coverage))
 
     for idx, e in enumerate(entries):
